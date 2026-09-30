@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "kantor-agent",
+  "displayName": "Kantor Agent",
+  "version": "1.0.0",
+  "description": "Kantor 3D tanpa konfigurasi: Ketua (sesi utama OpenCode/Kiro) bekerja di mejanya, 4 anggota tim santai di lounge lalu duduk bekerja saat agent memanggil subagent, dan freelancer datang lewat pintu bila tim penuh — semuanya dari data sesi nyata. Node ≥ 18 atau PHP ≥ 8.1.",
+  "author": { "name": "humaedihume", "url": "https://github.com/humaedihume" },
+  "homepage": "https://github.com/humaedihume/kantor-agent#readme",
+  "repository": "https://github.com/humaedihume/kantor-agent",
+  "license": "MIT",
+  "keywords": ["opencode", "kiro", "subagents", "dashboard", "three.js", "visualization", "monitoring", "indonesia"]
+}
