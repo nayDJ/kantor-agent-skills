@@ -93,6 +93,8 @@ if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then CLAUDE_DIR="$CLAUDE_CONFIG_DIR"
 else CLAUDE_DIR="$HOME/.claude"; fi
 if [ -n "${OMP_SESSIONS_DIR:-}" ]; then OMP_DIR="$OMP_SESSIONS_DIR"
 else OMP_DIR="$HOME/.omp/agent/sessions"; fi
+if [ -n "${GEMINI_SESSIONS_DIR:-}" ]; then GEMINI_DIR="$GEMINI_SESSIONS_DIR"
+else GEMINI_DIR="$HOME/.gemini/tmp"; fi
 
 cfg_value() { # nilai sederhana dari config JSON opsional (angka/boolean) tanpa bergantung pada runtime
   [ -f "$CONFIG" ] || return 0
@@ -291,6 +293,9 @@ print('sesi utama ' + str(m) + ', subagent ' + str(k))" "$KIRO_DIR" "$P" 2>/dev/
     if [ -d "$OMP_DIR" ]; then
       say "  OMP      : ada ($(find "$OMP_DIR" -type f -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ') sesi) ($OMP_DIR)"
     else say "  OMP      : belum ada ($OMP_DIR)"; fi
+    if [ -d "$GEMINI_DIR" ]; then
+      say "  Gemini   : ada ($(find "$GEMINI_DIR" -type f -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ') sesi) ($GEMINI_DIR)"
+    else say "  Gemini   : belum ada ($GEMINI_DIR)"; fi
     done ;;
   tunnel)
     command -v cloudflared >/dev/null 2>&1 || die "cloudflared belum terpasang (macOS: brew install cloudflared · Linux: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)."
@@ -340,6 +345,8 @@ print('sesi utama ' + str(m) + ', subagent ' + str(k))" "$KIRO_DIR" "$P" 2>/dev/
     else echo "  claude belum ada ($CLAUDE_DIR)"; fi
     if [ -d "$OMP_DIR" ]; then echo "  omp ada ($OMP_DIR, $(find "$OMP_DIR" -type f -name '*.jsonl' 2>/dev/null | head -n 1000 | wc -l | tr -d ' ') sesi, max 1000)"
     else echo "  omp belum ada ($OMP_DIR)"; fi
+    if [ -d "$GEMINI_DIR" ]; then echo "  gemini ada ($GEMINI_DIR, $(find "$GEMINI_DIR" -type f -name '*.jsonl' 2>/dev/null | head -n 1000 | wc -l | tr -d ' ') sesi, max 1000)"
+    else echo "  gemini belum ada ($GEMINI_DIR)"; fi
     echo "  data server $STATE" ;;
   *) echo "Perintah tidak dikenal: $CMD (start|stop|restart|status|url|tunnel|tunnel-stop|autostart|detect)" >&2; exit 2 ;;
 esac

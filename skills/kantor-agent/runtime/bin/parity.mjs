@@ -308,6 +308,48 @@ if (up) {
   } catch {
     /* abaikan */
   }
+
+  // gemini fixture: 1 sesi utama + 1 subagent subdir via GEMINI_SESSIONS_DIR sintetis
+  const GFIX = fs.mkdtempSync(path.join(os.tmpdir(), 'kantor-parity-gemini-'));
+  const gSlug = 'proyek-gemini';
+  const gChats = path.join(GFIX, gSlug, 'chats');
+  const gSub = path.join(gChats, 'sess-gemini-main');
+  fs.mkdirSync(gSub, { recursive: true });
+  fs.writeFileSync(path.join(GFIX, gSlug, '.project_root'), PROJECT);
+  const gt0 = new Date(Date.now() - 60000).toISOString();
+  const gt1 = new Date().toISOString();
+  const gMain = [
+    JSON.stringify({ sessionId: 'sess-gemini-main', projectHash: 'x', startTime: gt0, lastUpdated: gt1, summary: 'Gemini utama' }),
+    JSON.stringify({ id: 'u1', timestamp: gt0, type: 'user', content: 'halo' }),
+    JSON.stringify({ id: 'm1', timestamp: gt1, type: 'gemini', content: 'oke', toolCalls: [], tokens: { input: 10, output: 5 } }),
+  ].join('\n') + '\n';
+  const gSubLines = [
+    JSON.stringify({ sessionId: 'sub-gemini-1', projectHash: 'x', startTime: gt0, lastUpdated: gt1, summary: 'gemini-tugas-khusus-xyz' }),
+    JSON.stringify({ id: 'u2', timestamp: gt0, type: 'user', content: 'kerja' }),
+    JSON.stringify({ id: 'm2', timestamp: gt1, type: 'gemini', content: 'beres', toolCalls: [], tokens: { input: 3, output: 2 } }),
+  ].join('\n') + '\n';
+  fs.writeFileSync(path.join(gChats, 'session-20240101T120000-abc123.jsonl'), gMain);
+  fs.writeFileSync(path.join(gSub, 'sub-gemini-1.jsonl'), gSubLines);
+  const PP5 = PHP_PORT + 40;
+  const NP5 = NODE_PORT + 40;
+  const phpErr5 = start('php', ['-S', `127.0.0.1:${PP5}`, '-t', 'public', 'public/index.php'], { GEMINI_SESSIONS_DIR: GFIX });
+  const nodeErr5 = start(process.execPath, ['bin/serve-node.mjs'], { KANTOR_PORT: String(NP5), KANTOR_BIND: '127.0.0.1', GEMINI_SESSIONS_DIR: GFIX });
+  const P5 = `http://127.0.0.1:${PP5}`;
+  const N5 = `http://127.0.0.1:${NP5}`;
+  const up5 = (await waitUp(P5, 'PHP-gemini', phpErr5)) & (await waitUp(N5, 'Node-gemini', nodeErr5));
+  if (up5) {
+    const [gp, gn] = await Promise.all([get(P5, '/kerja/api/state'), get(N5, '/kerja/api/state')]);
+    const [sp5, sn5] = [await gp.json(), await gn.json()];
+    const d5 = diff(sp5, sn5, '$', new Set(['now']));
+    check(`state fixture Gemini identik (${sp5.runs?.length ?? 0} run)`, d5.length === 0, d5.slice(0, 10).join('; '));
+    const hasG = (s) => (s.runs || []).some((r) => r.task === 'gemini-tugas-khusus-xyz');
+    check('state memuat runs Gemini', hasG(sp5) && hasG(sn5), `PHP ${hasG(sp5)} / Node ${hasG(sn5)}`);
+  }
+  try {
+    fs.rmSync(GFIX, { recursive: true, force: true });
+  } catch {
+    /* abaikan */
+  }
 }
 
 cleanup();

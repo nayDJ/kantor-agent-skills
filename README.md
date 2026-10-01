@@ -143,7 +143,8 @@ OpenCode:  ~/.local/share/opencode/opencode.db (OPENCODE_DB)                  se
 Kiro CLI:  ~/.kiro/sessions/cli/<id>.json + <id>.jsonl (KIRO_SESSIONS_DIR)     reason "subagent" (atau parent_id agent non-null) → Tim/Freelancer
             Prompt / AssistantMessage(toolUse) → aksi & event
 Claude:    ~/.claude/projects/<path campur>/<sesi>.jsonl (CLAUDE_CONFIG_DIR)    sesi utama → Ketua; subagents/agent-*.jsonl → Tim/Freelancer
-OMP:       ~/.omp/agent/sessions/<bucket-cwd>/*.jsonl (OMP_SESSIONS_DIR)       sesi utama → Ketua; subdir <sesi>/<AgentId>.jsonl → Tim/Freelancer
+ OMP:       ~/.omp/agent/sessions/<bucket-cwd>/*.jsonl (OMP_SESSIONS_DIR)       sesi utama → Ketua; subdir <sesi>/<AgentId>.jsonl → Tim/Freelancer
+ Gemini:    ~/.gemini/tmp/<slug|hash>/chats/*.jsonl (GEMINI_SESSIONS_DIR)        sesi utama → Ketua; subdir <sesi>/<sesi>.jsonl → Tim/Freelancer
          │  dibaca read-only; output tool & isi prompt TIDAK pernah dibaca
          ▼
 skills/kantor-agent/runtime/   (dijalankan langsung dari folder skill — tidak disalin ke project)
@@ -163,7 +164,8 @@ Browser: kantor 3D — meja Ketua, 4 meja tim, 4 meja cadangan, lounge, pintu, p
 - Database OpenCode mengikuti `OPENCODE_DB` (bila di-set) atau `XDG_DATA_HOME`/`HOME`; sesi Kiro mengikuti
   `KIRO_SESSIONS_DIR` (bila di-set) atau `~/.kiro/sessions/cli`; sesi Claude mengikuti `CLAUDE_CONFIG_DIR`
   (bila di-set) atau `~/.claude`; sesi OMP mengikuti `OMP_SESSIONS_DIR` (bila di-set) atau
-  `~/.omp/agent/sessions` — server berjalan sebagai user yang sama.
+  `~/.omp/agent/sessions`; sesi Gemini mengikuti `GEMINI_SESSIONS_DIR` (bila di-set) atau
+  `~/.gemini/tmp` — server berjalan sebagai user yang sama.
 - **Status subagent:** *bekerja* (belum ada jawaban akhir & ada aktivitas ≤ 15 menit), *selesai* (jawaban akhir),
   *terhenti* (tanpa aktivitas > 15 menit), *limit* (pesan batas pemakaian).
 - **Status Ketua:** *bekerja* bila sesi utama aktif ≤ 90 detik, sedang menjalankan alat, atau menunggu subagent-nya;
@@ -213,7 +215,7 @@ bawaan runtime: Budi, Sari, Agus, Rina (lihat `defaults.json`):
 
 Variabel lingkungan: `KANTOR_PORT`, `KANTOR_RUNTIME` (`node`/`php`), `KANTOR_BIND` (default `127.0.0.1`),
 `KANTOR_STATE_DIR` (lokasi cache/log), `KANTOR_ALLOWED_HOSTS` (host tambahan di belakang reverse proxy),
-`KANTOR_AUTOSTART=1`, `OPENCODE_DB`, `KIRO_SESSIONS_DIR`, `CLAUDE_CONFIG_DIR`, `OPENCODE_WORKSPACE_ROOT`. Perubahan nama/judul
+ `KANTOR_AUTOSTART=1`, `OPENCODE_DB`, `KIRO_SESSIONS_DIR`, `CLAUDE_CONFIG_DIR`, `OMP_SESSIONS_DIR`, `GEMINI_SESSIONS_DIR`, `OPENCODE_WORKSPACE_ROOT`. Perubahan nama/judul
 langsung terpakai (halaman memuat ulang sendiri).
 
 ## Mode menjalankan

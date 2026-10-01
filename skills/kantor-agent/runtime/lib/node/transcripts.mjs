@@ -14,6 +14,7 @@ import {
 import { Kiro } from './kiro.mjs';
 import { Claude } from './claude.mjs';
 import { Omp } from './omp.mjs';
+import { Gemini } from './gemini.mjs';
 
 const CACHE_V = 3;
 const EVENTS_KEEP = 40;
@@ -69,9 +70,8 @@ export class Transcripts {
   }
 
   scan(nowSec) {
-    // ponytail: empat sumber (OpenCode DB + Kiro CLI + Claude Code + OMP) digabung; office yang memilih Ketua & membagi tim.
-    let oc = { exists: false, runs: [], mains: [] };
-    if (isFile(opencodeDb())) {
+    // ponytail: lima sumber (OpenCode DB + Kiro CLI + Claude Code + OMP + Gemini) digabung; office yang memilih Ketua & membagi tim.
+    let oc = { exists: false, runs: [], mains: [] };    if (isFile(opencodeDb())) {
       try {
         oc = lastGood = this.scanDb(nowSec);
       } catch {
@@ -81,7 +81,8 @@ export class Transcripts {
     const k = new Kiro(this.projectDir, this.storageDir, this.cfg).scan(nowSec);
     const c = new Claude(this.projectDir, this.storageDir, this.cfg).scan(nowSec);
     const o = new Omp(this.projectDir, this.storageDir, this.cfg).scan(nowSec);
-    return { exists: oc.exists || k.exists || c.exists || o.exists, runs: [...oc.runs, ...k.runs, ...c.runs, ...o.runs], mains: [...oc.mains, ...k.mains, ...c.mains, ...o.mains] };
+    const g = new Gemini(this.projectDir, this.storageDir, this.cfg).scan(nowSec);
+    return { exists: oc.exists || k.exists || c.exists || o.exists || g.exists, runs: [...oc.runs, ...k.runs, ...c.runs, ...o.runs, ...g.runs], mains: [...oc.mains, ...k.mains, ...c.mains, ...o.mains, ...g.mains] };
   }
 
   scanDb(nowSec) {
