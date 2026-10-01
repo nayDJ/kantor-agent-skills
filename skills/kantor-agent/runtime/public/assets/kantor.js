@@ -39,6 +39,18 @@ function setFocus(id, push = true) {
   if (!r) return;
   FOCUS = r;
   useRoom(r);
+  // T9: arahkan kamera ke tengah ruangan (klik lantai/papan/dropdown); dblclick kembali ke HOME grid.
+  try {
+    const mob = innerWidth < 820;
+    const cxr = (r.bounds.x0 + r.bounds.x1) / 2;
+    const czr = (r.bounds.z0 + r.bounds.z1) / 2;
+    const t1 = new THREE.Vector3(cxr + (mob ? -1.9 : -1.0), mob ? 0.4 : 0.6, czr + (mob ? -0.9 : -0.7));
+    const p1 = new THREE.Vector3(cxr + (mob ? -2.2 : -1.2), mob ? 14.5 : 12.5, czr + (mob ? 20.0 : 17.3));
+    if (REDUCED) {
+      camera.position.copy(p1);
+      controls.target.copy(t1);
+    } else tween = { t: 0, p0: camera.position.clone(), t0: controls.target.clone(), p1, t1 };
+  } catch { /* kamera belum siap */ }
   const sel = document.getElementById('projSel');
   if (sel && sel.value !== r.id) sel.value = r.id;
   if (push) {
@@ -253,6 +265,7 @@ const V = (x, z) => new THREE.Vector3(x, 0, z);
 // Tiap ruangan = satu project. Fungsi murni dipakai ulang apa adanya dengan offset X;
 // registries per-room dipegang objek Room di ROOMS[]. Tahap infra: N=1 (ox=0, identik).
 const ROOM_W = 22;
+const ROOM_D = 15;
 const ROOMS = []; // Room {id,title,ox,desks,places,actors,ketua,team,door,loungeAt,pads,...}
 // ponytail: konteks aktif = ROOMS[0]; poll/apply/frame/renderUi beroperasi di sini sampai task berikut memecahnya.
 let ROOM = null;
@@ -307,7 +320,7 @@ function roomOf(a) {
 }
 const goalRaw = (a) => rawPid(a?.goal);
 const roomHue = (id) => hash(id) % 360;
-function buildRoomShell(roomId) {
+function buildRoomShell(roomId, oz = 0) {
   const fl = canvasTex(1024, 1024);
   const single = PROJECTS.length < 2;
   const hue = single ? 0 : roomHue(roomId || '');
@@ -347,15 +360,15 @@ function buildRoomShell(roomId) {
   back.position.set(cx, ROOM.h / 2, ROOM.z0 - 0.15);
   scene.add(back);
   // dinding kiri dengan lubang pintu (z −2.65 … −1.55, tinggi 2.3)
-  const DZ0 = CORRIDOR_Z - 0.55;
-  const DZ1 = CORRIDOR_Z + 0.55;
+  const DZ0 = CORRIDOR_Z + oz - 0.55;
+  const DZ1 = CORRIDOR_Z + oz + 0.55;
   const DH = 2.3;
   const segA = mesh(new THREE.BoxGeometry(0.3, ROOM.h, DZ0 - (ROOM.z0 - 0.3)), wallM, { cast: false });
   segA.position.set(ROOM.x0 - 0.15, ROOM.h / 2, (DZ0 + ROOM.z0 - 0.3) / 2);
   const segB = mesh(new THREE.BoxGeometry(0.3, ROOM.h, ROOM.z1 - DZ1), wallM, { cast: false });
   segB.position.set(ROOM.x0 - 0.15, ROOM.h / 2, (ROOM.z1 + DZ1) / 2);
   const lintel = mesh(new THREE.BoxGeometry(0.3, ROOM.h - DH, DZ1 - DZ0), wallM, { cast: false });
-  lintel.position.set(ROOM.x0 - 0.15, DH + (ROOM.h - DH) / 2, CORRIDOR_Z);
+  lintel.position.set(ROOM.x0 - 0.15, DH + (ROOM.h - DH) / 2, CORRIDOR_Z + oz);
   scene.add(segA, segB, lintel);
   const baseM = mat('#d6cbbb', 0.8);
   const bb1 = mesh(new THREE.BoxGeometry(W, 0.14, 0.04), baseM);
@@ -371,7 +384,7 @@ function buildRoomShell(roomId) {
 }
 
 // pintu kantor (jalur masuk/keluar freelancer) — daun pintu berayun terbuka saat ada yang lewat
-function buildDoor() {
+function buildDoor(oz = 0) {
   const g = new THREE.Group();
   const frameM = mat('#fbfaf7', 0.6);
   const W = 1.1;
@@ -408,7 +421,7 @@ function buildDoor() {
   const mat2 = mesh(new THREE.PlaneGeometry(0.8, 1.1).rotateX(-Math.PI / 2), mat('#7d6a55', 1), { cast: false });
   mat2.position.set(0.55, 0.012, 0);
   g.add(mat2);
-  g.position.set(ROOM.x0, 0, CORRIDOR_Z);
+  g.position.set(ROOM.x0, 0, CORRIDOR_Z + oz);
   scene.add(g);
   return { hinge, open: 0 };
 }
@@ -431,7 +444,7 @@ function buildWindow(cx, cy, w, h) {
   scene.add(sill);
   windows.push(sky);
 }
-function buildRoomWindows(ox) {
+function buildRoomWindows(ox, oz = 0) {
   buildWindow(3.5 + ox, 2.75, 2.0, 2.0);
   buildWindow(6.3 + ox, 2.75, 2.0, 2.0);
 }
@@ -777,15 +790,15 @@ function tvCorner(x, y, z) {
 }
 drawTv();
 
-function buildFurniture(ox) {
-  MEET = { x: -5.2 + ox, z: 3.7 };
+function buildFurniture(ox, oz = 0) {
+  MEET = { x: -5.2 + ox, z: 3.7 + oz };
   LOUNGE_PADS = [];
-  bookshelf(ROOM.x0 + 0.25, 3.8, Math.PI / 2);
+  bookshelf(ROOM.x0 + 0.25, 3.8 + oz, Math.PI / 2);
   plant(ROOM.x0 + 0.6, ROOM.z0 + 0.6, 1.25, 2);
   plant(6.6 + ox, ROOM.z0 + 0.6, 1.0, 4);
-  plant(ROOM.x0 + 0.6, 1.2, 1.0, 6);
-  plant(ROOM.x1 - 0.7, 5.2, 1.3, 8);
-  plant(7.4 + ox, 2.3, 0.9, 14);
+  plant(ROOM.x0 + 0.6, 1.2 + oz, 1.0, 6);
+  plant(ROOM.x1 - 0.7, 5.2 + oz, 1.3, 8);
+  plant(7.4 + ox, 2.3 + oz, 0.9, 14);
   // pojok kopi (dinding belakang kanan)
   const counter = mesh(box(2.4, 0.95, 0.9, 0.03), mat('#ece5da', 0.7));
   counter.position.set(8.2 + ox, 0.475, ROOM.z0 + 0.55);
@@ -832,7 +845,7 @@ function buildFurniture(ox) {
   scene.add(laptop);
   // sudut santai: sofa menghadap TV
   const lounge = new THREE.Group();
-  lounge.position.set(4.9 + ox, 0, 1.45);
+  lounge.position.set(4.9 + ox, 0, 1.45 + oz);
   lounge.rotation.y = Math.PI;
   const fabric = mat('#6f8f86', 0.95);
   const sofaBase = mesh(box(2.6, 0.42, 0.95, 0.12), fabric);
@@ -874,7 +887,7 @@ function buildFurniture(ox) {
   pad2.rotation.y = -0.3;
   lounge.add(pad1, pad2);
   LOUNGE_PADS.push(pad1, pad2);
-  scene.add(lounge, tvCorner(4.9 + ox, 0, -1.3));
+  scene.add(lounge, tvCorner(4.9 + ox, 0, -1.3 + oz));
 }
 
 // ---------------------------------------------------------------- papan dinding
@@ -912,7 +925,7 @@ function wallBoard({ w, h, cw, ch, pos, rotY, roomId }) {
   }
   return t;
 }
-function buildNameBoard(roomId, title, ox) {
+function buildNameBoard(roomId, title, ox, oz = 0) {
   const t = canvasTex(1024, 192);
   t.ctx.fillStyle = '#2f2a26';
   t.ctx.fillRect(0, 0, 1024, 192);
@@ -924,22 +937,22 @@ function buildNameBoard(roomId, title, ox) {
   t.ctx.fillText(fit(t.ctx, title || roomId, 940), 48, 100);
   t.tex.needsUpdate = true;
   const face = mesh(new THREE.PlaneGeometry(3.2, 0.6), new THREE.MeshStandardMaterial({ map: t.tex, roughness: 0.5 }), { cast: false });
-  face.position.set(ROOM.x0 + 0.18, 2.95, CORRIDOR_Z);
+  face.position.set(ROOM.x0 + 0.18, 2.95, CORRIDOR_Z + oz);
   face.rotation.y = Math.PI / 2;
   face.userData.roomId = roomId;
   roomHit.push(face);
   scene.add(face);
   return t;
 }
-function buildBoards(ox, roomId, title) {
+function buildBoards(ox, oz, roomId, title) {
   todoBoard = wallBoard({ w: 6.0, h: 2.5, cw: 2048, ch: 854, pos: new THREE.Vector3(-1.0 + ox, 2.8, ROOM.z0 + 0.02), rotY: 0, roomId });
   histBoard = wallBoard({ w: 4.2, h: 2.4, cw: 1792, ch: 1024, pos: new THREE.Vector3(-7.2 + ox, 2.8, ROOM.z0 + 0.02), rotY: 0, roomId });
-  buildNameBoard(roomId, title, ox);
-  buildRoomClock(ox);
+  buildNameBoard(roomId, title, ox, oz);
+  buildRoomClock(ox, oz);
 }
 
 const clockTex = canvasTex(256, 256);
-function buildRoomClock(ox) {
+function buildRoomClock(ox, oz = 0) {
   const face = mesh(new THREE.CircleGeometry(0.42, 48), new THREE.MeshStandardMaterial({ map: clockTex.tex, roughness: 0.4 }), { cast: false });
   face.position.set(8.6 + ox, 3.4, ROOM.z0 + 0.05);
   const rim = mesh(new THREE.TorusGeometry(0.43, 0.035, 10, 48), mat('#3a3d44', 0.4, 0.4));
@@ -1249,11 +1262,11 @@ function monitor(w, h) {
 // meja: A0 = Ketua, A1–A4 = tim, B0–B3 = meja cadangan freelancer
 const ROW_A_Z = -4.3;
 const ROW_B_Z = -0.7;
-function buildDesks(ox) {
+function buildDesks(ox, oz = 0) {
   DESK_DEFS = [
-    { id: 'A0', x: -7.0 + ox, z: ROW_A_Z, kind: 'ketua', color: COLORS.ketua },
-    ...TEAM_NAMES.map((n, i) => ({ id: `A${i + 1}`, x: -4.2 + i * 2.8 + ox, z: ROW_A_Z, kind: 'tim', idx: i, color: COLORS.team[i % COLORS.team.length] })),
-    ...Array.from({ length: SPARE }, (_, j) => ({ id: `B${j}`, x: -7.0 + j * 2.8 + ox, z: ROW_B_Z, kind: 'spare', idx: j, color: '#9a938a', gap: [-8.6, -5.6, -2.8, 2.8][j] + ox })),
+    { id: 'A0', x: -7.0 + ox, z: ROW_A_Z + oz, kind: 'ketua', color: COLORS.ketua },
+    ...TEAM_NAMES.map((n, i) => ({ id: `A${i + 1}`, x: -4.2 + i * 2.8 + ox, z: ROW_A_Z + oz, kind: 'tim', idx: i, color: COLORS.team[i % COLORS.team.length] })),
+    ...Array.from({ length: SPARE }, (_, j) => ({ id: `B${j}`, x: -7.0 + j * 2.8 + ox, z: ROW_B_Z + oz, kind: 'spare', idx: j, color: '#9a938a', gap: [-8.6, -5.6, -2.8, 2.8][j] + ox })),
   ];
   desks = {};
   DESK_DEFS.forEach(buildDesk);
@@ -1346,27 +1359,27 @@ function buildDesk(def) {
 // ---------------------------------------------------------------- tempat & jalur (koridor z = −2.1 + "jari" ke tiap tempat)
 // Setiap tempat punya spoke: titik pertama di koridor, lalu titik-titik sampai posisi akhir. Rute A→B =
 // mundur lewat spoke A ke koridor → sepanjang koridor → maju lewat spoke B. Bebas tabrakan dengan perabot.
-function buildPlaces(ox) {
+function buildPlaces(ox, oz = 0) {
   PLACES = {};
   for (const d of Object.values(desks)) {
     const seatPos = V(d.x, d.z + 0.95);
-    const spoke = d.z === ROW_A_Z ? [V(d.x, CORRIDOR_Z)] : [V(d.gap, CORRIDOR_Z), V(d.gap, 0.95), V(d.x, 0.95)];
+    const spoke = d.z === ROW_A_Z + oz ? [V(d.x, CORRIDOR_Z + oz)] : [V(d.gap, CORRIDOR_Z + oz), V(d.gap, 0.95 + oz), V(d.x, 0.95 + oz)];
     PLACES[`desk:${d.id}`] = { kind: 'desk', desk: d, pos: seatPos, heading: Math.PI, spoke };
   }
   SPOTS = {
-    tv: { pos: V(4.3 + ox, 1.25), heading: Math.PI, spoke: [V(3.2 + ox, CORRIDOR_Z), V(3.2 + ox, 1.05)], sit: 'sofa' },
-    ps: { pos: V(5.5 + ox, 1.25), heading: Math.PI, spoke: [V(7.0 + ox, CORRIDOR_Z), V(6.9 + ox, 1.05)], sit: 'sofa' },
-    coffee: { pos: V(7.7 + ox, -5.55), heading: Math.PI, spoke: [V(7.2 + ox, CORRIDOR_Z), V(7.4 + ox, -5.0)] },
-    water: { pos: V(8.75 + ox, -5.45), heading: Math.PI / 2, spoke: [V(7.2 + ox, CORRIDOR_Z), V(7.4 + ox, -5.0)] },
-    window: { pos: V(3.5 + ox, -6.15), heading: Math.PI, spoke: [V(6.3 + ox, CORRIDOR_Z), V(6.3 + ox, -5.6)] },
-    guitar: { pos: V(-1.4 + ox, 2.6), heading: 0.35, spoke: [V(2.8 + ox, CORRIDOR_Z), V(2.8 + ox, 1.7)] },
-    meet1: { pos: V(MEET.x + 0.585, MEET.z - 1.217), heading: -0.448, spoke: [V(-2.8 + ox, CORRIDOR_Z), V(-2.8 + ox, 1.2)], sit: 'chair' },
-    meet2: { pos: V(MEET.x - 1.346, MEET.z + 0.103), heading: 1.648, spoke: [V(-8.6 + ox, CORRIDOR_Z), V(-8.6 + ox, 1.6), V(-7.6 + ox, 3.8)], sit: 'chair' },
-    meet3: { pos: V(MEET.x + 0.762, MEET.z + 1.114), heading: -2.54, spoke: [V(-2.8 + ox, CORRIDOR_Z), V(-2.8 + ox, 1.2), V(-3.3 + ox, 4.6)], sit: 'chair' },
-    bookshelf: { pos: V(-8.9 + ox, 3.8), heading: -Math.PI / 2, spoke: [V(-8.6 + ox, CORRIDOR_Z), V(-8.6 + ox, 2.4)] },
+    tv: { pos: V(4.3 + ox, 1.25 + oz), heading: Math.PI, spoke: [V(3.2 + ox, CORRIDOR_Z + oz), V(3.2 + ox, 1.05 + oz)], sit: 'sofa' },
+    ps: { pos: V(5.5 + ox, 1.25 + oz), heading: Math.PI, spoke: [V(7.0 + ox, CORRIDOR_Z + oz), V(6.9 + ox, 1.05 + oz)], sit: 'sofa' },
+    coffee: { pos: V(7.7 + ox, -5.55 + oz), heading: Math.PI, spoke: [V(7.2 + ox, CORRIDOR_Z + oz), V(7.4 + ox, -5.0 + oz)] },
+    water: { pos: V(8.75 + ox, -5.45 + oz), heading: Math.PI / 2, spoke: [V(7.2 + ox, CORRIDOR_Z + oz), V(7.4 + ox, -5.0 + oz)] },
+    window: { pos: V(3.5 + ox, -6.15 + oz), heading: Math.PI, spoke: [V(6.3 + ox, CORRIDOR_Z + oz), V(6.3 + ox, -5.6 + oz)] },
+    guitar: { pos: V(-1.4 + ox, 2.6 + oz), heading: 0.35, spoke: [V(2.8 + ox, CORRIDOR_Z + oz), V(2.8 + ox, 1.7 + oz)] },
+    meet1: { pos: V(MEET.x + 0.585, MEET.z - 1.217), heading: -0.448, spoke: [V(-2.8 + ox, CORRIDOR_Z + oz), V(-2.8 + ox, 1.2 + oz)], sit: 'chair' },
+    meet2: { pos: V(MEET.x - 1.346, MEET.z + 0.103), heading: 1.648, spoke: [V(-8.6 + ox, CORRIDOR_Z + oz), V(-8.6 + ox, 1.6 + oz), V(-7.6 + ox, 3.8 + oz)], sit: 'chair' },
+    meet3: { pos: V(MEET.x + 0.762, MEET.z + 1.114), heading: -2.54, spoke: [V(-2.8 + ox, CORRIDOR_Z + oz), V(-2.8 + ox, 1.2 + oz), V(-3.3 + ox, 4.6 + oz)], sit: 'chair' },
+    bookshelf: { pos: V(-8.9 + ox, 3.8 + oz), heading: -Math.PI / 2, spoke: [V(-8.6 + ox, CORRIDOR_Z + oz), V(-8.6 + ox, 2.4 + oz)] },
   };
   for (const [id, s] of Object.entries(SPOTS)) PLACES[`spot:${id}`] = { kind: 'spot', spot: id, ...s };
-  PLACES.door = { kind: 'door', pos: V(ROOM.x0 - 0.9, CORRIDOR_Z), heading: -Math.PI / 2, spoke: [V(ROOM.x0 + 0.6, CORRIDOR_Z)] };
+  PLACES.door = { kind: 'door', pos: V(ROOM.x0 - 0.9, CORRIDOR_Z + oz), heading: -Math.PI / 2, spoke: [V(ROOM.x0 + 0.6, CORRIDOR_Z + oz)] };
   SPOT_IDS = Object.keys(SPOTS);
 }
 
@@ -1677,8 +1690,8 @@ function chatter(now) {
 // ---------------------------------------------------------------- satu ruangan = satu project (T5)
 // Bungkus pembangunan ruangan: isi konteks aktif lalu jepret ke objek Room.
 // Key aktor namespaced `<roomId>:…` agar unik antar-ruangan (kontrak K2).
-function buildRoomInstance(roomId, title, ox) {
-  ROOM = { x0: -10 + ox, x1: 10 + ox, z0: -7, z1: 6, h: 5.2 };
+function buildRoomInstance(roomId, title, ox, oz = 0, row = 0, col = 0) {
+  ROOM = { x0: -10 + ox, x1: 10 + ox, z0: -7 + oz, z1: 6 + oz, h: 5.2 };
   DESK_DEFS = [];
   desks = {};
   PLACES = {};
@@ -1690,18 +1703,18 @@ function buildRoomInstance(roomId, title, ox) {
   windows = [];
   todoBoard = null;
   histBoard = null;
-  buildRoomShell(roomId);
-  door = buildDoor();
-  buildRoomWindows(ox);
-  buildFurniture(ox);
-  buildBoards(ox, roomId, title);
-  buildDesks(ox);
-  buildPlaces(ox);
+  buildRoomShell(roomId, oz);
+  door = buildDoor(oz);
+  buildRoomWindows(ox, oz);
+  buildFurniture(ox, oz);
+  buildBoards(ox, oz, roomId, title);
+  buildDesks(ox, oz);
+  buildPlaces(ox, oz);
   // Ketua + 4 anggota tim selalu ada
   KETUA = makeActor({ key: `${roomId}:ketua`, kind: 'ketua', name: KETUA_NAME, role: 'Ketua', color: COLORS.ketua, look: LOOKS.ketua, desk: 'A0' });
   TEAM = TEAM_NAMES.map((n, i) => makeActor({ key: `${roomId}:tim-${i}`, kind: 'tim', idx: i, name: n, role: 'Tim', color: COLORS.team[i % COLORS.team.length], look: LOOKS.team[i], desk: `A${i + 1}` }));
   const room = {
-    id: roomId, title, ox,
+    id: roomId, title, ox, oz, row, col,
     desks, places: PLACES, actors, ketua: KETUA, team: TEAM, door, loungeAt: LOUNGE, pads: LOUNGE_PADS,
     bounds: ROOM, meet: MEET, spots: SPOTS, spotIds: SPOT_IDS, deskDefs: DESK_DEFS, windows, todoBoard, histBoard,
     state: null, firstLoad: true, prev: new Map(), prevFeed: new Set(), boardSig: '', fresh: new Set(),
@@ -1712,18 +1725,39 @@ function buildRoomInstance(roomId, title, ox) {
   ROOMS.push(room);
   return room;
 }
-// T6: N ruangan berjajar (ox = idx*22); N=1 identik tampilan lama.
-PROJECTS.forEach((p, i) => buildRoomInstance(p.id, p.title, i * ROOM_W));
+// T6: N ruangan grid (C=ceil(sqrt(N)); ox=col*22, oz=row*15); N=1 identik tampilan lama.
+{
+  const C = Math.ceil(Math.sqrt(PROJECTS.length));
+  PROJECTS.forEach((p, i) => {
+    const col = i % C;
+    const row = Math.floor(i / C);
+    buildRoomInstance(p.id, p.title, col * ROOM_W, row * ROOM_D, row, col);
+  });
+}
 FOCUS = ROOMS.find((r) => r.id === FOCUS_Q) || ROOMS.find((r) => r.id === CFG.current) || ROOMS[0];
 useRoom(FOCUS);
-(function fitCamera() {
-  const N = ROOMS.length;
-  const cx = ((N - 1) * ROOM_W) / 2;
-  if (N > 1) {
-    HOME.pos.set(cx - 1.2, 12.5 + (N - 1) * 4.5, 16.8 + (N - 1) * 11);
-    HOME.target.set(cx - 1.0, 0.6, -1.2);
-    controls.maxDistance = 34 + (N - 1) * 20;
+// T9: bounding box seluruh grid 2D; skala kamera = max(lebar,dalam)/ruangan-tunggal (N=1 → 1, identik).
+function gridBounds() {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const r of ROOMS) {
+    if (r.bounds.x0 < minX) minX = r.bounds.x0;
+    if (r.bounds.x1 > maxX) maxX = r.bounds.x1;
+    if (r.bounds.z0 < minZ) minZ = r.bounds.z0;
+    if (r.bounds.z1 > maxZ) maxZ = r.bounds.z1;
   }
+  return { minX, maxX, minZ, maxZ, cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2, w: maxX - minX, d: maxZ - minZ };
+}
+(function fitCamera() {
+  const g = gridBounds();
+  const r0 = ROOMS[0].bounds;
+  const s = Math.max(g.w, g.d) / Math.max(r0.x1 - r0.x0, r0.z1 - r0.z0); // N=1 → 1
+  const mob = innerWidth < 820;
+  HOME.pos.set(g.cx + (mob ? -2.2 : -1.2), (mob ? 14.5 : 12.5) * s, g.cz + (mob ? 20.0 : 17.3) * s);
+  HOME.target.set(g.cx + (mob ? -1.9 : -1.0), mob ? 0.4 : 0.6, g.cz + (mob ? -0.9 : -0.7));
+  controls.maxDistance = 34 * s; // 2x2 → s≈2.1, seluruh grid muat di desktop
   camera.position.copy(HOME.pos);
   controls.target.copy(HOME.target);
 })();
@@ -2476,7 +2510,7 @@ function frame() {
     let near = false;
     for (const a of actors.values()) {
       const p = a.p.root.getWorldPosition(tmpV);
-      if (Math.abs(p.z - CORRIDOR_Z) < 1 && p.x < ROOM.x0 + 1.4 && p.x > ROOM.x0 - 1.4) near = true;
+      if (Math.abs(p.z - (CORRIDOR_Z + (room.oz || 0))) < 1 && p.x < ROOM.x0 + 1.4 && p.x > ROOM.x0 - 1.4) near = true;
     }
     door.open = REDUCED ? (near ? 1 : 0) : THREE.MathUtils.lerp(door.open, near ? 1 : 0, Math.min(1, dt * 5));
     door.hinge.rotation.y = door.open * 1.35; // berayun ke dalam ruangan
@@ -2503,10 +2537,19 @@ function frame() {
     controls.target.lerpVectors(tween.t0, tween.t1, e);
     if (tween.t >= 1) tween = null;
   }
-  const X0 = ROOMS.length ? ROOMS[0].bounds.x0 + 1 : ROOM.x0 + 1;
-  const X1 = ROOMS.length ? ROOMS[ROOMS.length - 1].bounds.x1 - 1 : ROOM.x1 - 1;
-  controls.target.x = THREE.MathUtils.clamp(controls.target.x, X0, Math.max(X0, X1));
-  controls.target.z = THREE.MathUtils.clamp(controls.target.z, ROOM.z0 + 1, ROOM.z1 - 1);
+  // T9: clamp target ke bounding grid 2D (N=1 identik: x0+1..x1-1, z0+1..z1-1).
+  let GX0 = ROOM.x0 + 1;
+  let GX1 = ROOM.x1 - 1;
+  let GZ0 = ROOM.z0 + 1;
+  let GZ1 = ROOM.z1 - 1;
+  if (ROOMS.length) {
+    GX0 = Math.min(...ROOMS.map((r) => r.bounds.x0)) + 1;
+    GX1 = Math.max(...ROOMS.map((r) => r.bounds.x1)) - 1;
+    GZ0 = Math.min(...ROOMS.map((r) => r.bounds.z0)) + 1;
+    GZ1 = Math.max(...ROOMS.map((r) => r.bounds.z1)) - 1;
+  }
+  controls.target.x = THREE.MathUtils.clamp(controls.target.x, GX0, Math.max(GX0, GX1));
+  controls.target.z = THREE.MathUtils.clamp(controls.target.z, GZ0, Math.max(GZ0, GZ1));
   controls.target.y = THREE.MathUtils.clamp(controls.target.y, 0.3, 3.5);
   controls.update();
   renderer.render(scene, camera);
