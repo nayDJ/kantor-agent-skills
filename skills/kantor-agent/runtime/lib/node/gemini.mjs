@@ -411,6 +411,7 @@ export class Gemini {
       case 'ask_user': case 'question': text = 'Bertanya ke user'; break;
       case 'todo': case 'todowrite': text = 'Memperbarui daftar tugas'; break;
       case 'task': case 'subagent': text = `Mendelegasikan: ${str(args.description) !== '' ? str(args.description) : 'subagent'}`; break;
+      case 'update_topic': text = `Topik: ${clip(str(args.title), 60)}`; break;
       default: text = clip(name, 60); // ponytail: nama tool bervariasi antar versi; tampil apa adanya.
     }
     return [oneLine(text, 160), withFile ? f : null];

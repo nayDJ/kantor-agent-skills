@@ -562,6 +562,7 @@ final class KGemini
             'ask_user', 'question' => 'Bertanya ke user',
             'todo', 'todowrite' => 'Memperbarui daftar tugas',
             'task', 'subagent' => 'Mendelegasikan: ' . ($str($args['description'] ?? null) !== '' ? $str($args['description']) : 'subagent'),
+            'update_topic' => 'Topik: ' . KUtil::clip($str($args['title'] ?? null), 60),
             // ponytail: nama tool bervariasi antar versi; tampil apa adanya.
             default => KUtil::clip($name, 60),
         };
