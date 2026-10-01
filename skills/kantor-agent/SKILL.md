@@ -12,7 +12,8 @@ Argumen user: $ARGUMENTS
 
 ## Langkah
 1. **Pilih perintah dari argumen** (tanpa argumen = `start`):
-   - `start` / kosong → `bash "runtime/bin/kantor.sh" start` (teruskan `--node`, `--php`, `--port N` bila ada).
+   - `start` / kosong → `bash "runtime/bin/kantor.sh" start` (teruskan `--node`, `--php`, `--port N`,
+     `--project DIR` (boleh diulang untuk multi-project) bila ada).
    - `stop` → `… kantor.sh stop` · `status` → `… kantor.sh status` · `restart` → `… kantor.sh restart`.
    - `publik` / `tunnel` / `--publik` → jalankan `start` dulu, lalu `… kantor.sh tunnel` (butuh `cloudflared`).
    - `tutup-publik` / `tunnel-stop` → `… kantor.sh tunnel-stop`.
@@ -33,8 +34,10 @@ Argumen user: $ARGUMENTS
   selesai/dihentikan/limit → "Beres!" lalu kembali santai. Penugasan dihitung ulang dari data yang sama sehingga stabil.
 - **Freelancer** = subagent saat keempat anggota tim sibuk: masuk lewat pintu, duduk di meja cadangan (maks 4 meja,
   sisanya kartu "+N"), pulang lewat pintu setelah selesai.
-- Nama/judul/port bisa ditimpa lewat `<project>/.opencode/kantor-agent.json` (opsional, lihat README):
-  `{"title": "…", "port": 8788, "names": {"ketua": "…", "team": ["…","…","…","…"], "freelancers": ["…"]}, "autostart": false}`.
+- Nama/judul/port/layout bisa ditimpa lewat `<project>/.opencode/kantor-agent.json` (opsional, lihat README):
+  `{"title": "…", "port": 8788, "layout": "kantor"|"pantai", "names": {"ketua": "…", "team": ["…","…","…","…"], "freelancers": ["…"]}, "autostart": false}`.
+- Multi-project (`--project` diulang): Bos berkunjung lewat dropdown "Bos mengunjungi" di bar atas — seluruh
+  isi kantor mengikuti project terpilih. Tombol Pantai/Kantor mengganti suasana per project (override sesi).
 
 ## Aturan
 - Read-only terhadap project dan transkrip; jangan membuat atau mengubah file di project kecuali user meminta

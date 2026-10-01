@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Kantor Agent — server lokal untuk memantau agent OpenCode project di folder ini (read-only).
 #
-#   bash kantor.sh start   [--node|--php] [--port N] [--project DIR] [--bind ADDR]   jalankan (idempoten)
+#   bash kantor.sh start   [--node|--php] [--port N] [--project DIR …] [--bind ADDR]   jalankan (idempoten)
 #   bash kantor.sh stop                                                              hentikan server + tunnel
 #   bash kantor.sh restart [opsi start]
 #   bash kantor.sh status                                                            status, URL, lokasi log
@@ -22,7 +22,7 @@ CMD="${1:-start}"
 [ $# -gt 0 ] && shift
 WANT_RT="${KANTOR_RUNTIME:-}"
 WANT_PORT=""
-PROJ_ARG=""
+PROJ_ARGS=""
 BIND="${KANTOR_BIND:-127.0.0.1}"
 QUIET=0
 while [ $# -gt 0 ]; do
@@ -31,8 +31,10 @@ while [ $# -gt 0 ]; do
     --php) WANT_RT=php ;;
     --port) WANT_PORT="${2:-}"; shift ;;
     --port=*) WANT_PORT="${1#--port=}" ;;
-    --project) PROJ_ARG="${2:-}"; shift ;;
-    --project=*) PROJ_ARG="${1#--project=}" ;;
+    --project) PROJ_ARGS="${PROJ_ARGS:+$PROJ_ARGS
+}${2:-}"; shift ;;
+    --project=*) PROJ_ARGS="${PROJ_ARGS:+$PROJ_ARGS
+}${1#--project=}" ;;
     --bind) BIND="${2:-}"; shift ;;
     --bind=*) BIND="${1#--bind=}" ;;
     --quiet|-q) QUIET=1 ;;
@@ -50,13 +52,34 @@ if [ "$CMD" = help ]; then
   exit 0
 fi
 
-# ---- project & folder status
-if [ -n "$PROJ_ARG" ]; then P0="$PROJ_ARG"
+# ---- project & folder status (--project boleh diulang untuk multi-project)
+if [ -n "$PROJ_ARGS" ]; then P0="$PROJ_ARGS"
 elif [ -n "${KANTOR_PROJECT:-}" ]; then P0="$KANTOR_PROJECT"
 elif [ "$CMD" = autostart ] && [ -n "${OPENCODE_WORKSPACE_ROOT:-}" ]; then P0="$OPENCODE_WORKSPACE_ROOT"
 else P0="$PWD"; fi
-PROJECT="$(cd "$P0" 2>/dev/null && pwd -P)" || die "folder project tidak ditemukan: $P0"
-SLUG="$(printf '%s' "$PROJECT" | sed 's/[^a-zA-Z0-9]/-/g')"
+PROJECTS_NL=""
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  rp="$(cd "$line" 2>/dev/null && pwd -P)" || die "folder project tidak ditemukan: $line"
+  case "$PROJECTS_NL" in *"$rp"*) ;; *) PROJECTS_NL="${PROJECTS_NL:+$PROJECTS_NL
+}$rp" ;; esac
+done <<EOF
+$P0
+EOF
+[ -n "$PROJECTS_NL" ] || die "tidak ada folder project: $P0"
+PROJECT="$(printf '%s' "$PROJECTS_NL" | head -1)"
+if [ "$(printf '%s\n' "$PROJECTS_NL" | grep -c .)" -gt 1 ]; then MULTI=1; else MULTI=0; fi
+md5str() { # md5 12 char dari stdin
+  if command -v md5sum >/dev/null 2>&1; then md5sum | cut -c1-12
+  elif command -v md5 >/dev/null 2>&1; then md5 -q -s "$(cat)" | cut -c1-12
+  elif have_node; then node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(require("crypto").createHash("md5").update(s).digest("hex").slice(0,12)))'
+  else php -r 'echo substr(md5(stream_get_contents(STDIN)), 0, 12);'; fi
+}
+if [ "$MULTI" = 1 ]; then
+  SLUG="hub-$(printf '%s' "$PROJECTS_NL" | md5str)"
+else
+  SLUG="$(printf '%s' "$PROJECT" | sed 's/[^a-zA-Z0-9]/-/g')"
+fi
 STATE="${KANTOR_STATE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/kantor-agent}/$SLUG"
 ENVF="$STATE/server.env"
 LOG="$STATE/server.log"
@@ -106,6 +129,7 @@ trim_log() { # log PHP bertambah tiap permintaan — potong bila > 5 MB (aman un
   return 0
 }
 PID_PROJECT="$(project_id)"
+if [ "$MULTI" = 1 ]; then PID_PROJECT="$(printf '%s' "$PROJECTS_NL" | md5str)"; fi
 
 running() { # 0 bila server tercatat & menjawab
   local pid port
@@ -150,7 +174,12 @@ print_running() {
   local port rt url
   port="$(envget PORT)"; rt="$(envget RUNTIME)"
   url="http://$(host_for_url):$port/kerja"
-  say "Kantor Agent berjalan ($rt) untuk project: $(basename "$PROJECT")"
+  if [ "$MULTI" = 1 ]; then
+    say "Kantor Agent berjalan ($rt) untuk $(printf '%s\n' "$PROJECTS_NL" | grep -c .) project:"
+    printf '%s\n' "$PROJECTS_NL" | while IFS= read -r d; do say "  - $(basename "$d") ($d)"; done
+  else
+    say "Kantor Agent berjalan ($rt) untuk project: $(basename "$PROJECT")"
+  fi
   say "  URL      : $url"
   case "$(envget BIND)" in 127.0.0.1|localhost|::1) ;; *) say "  Jaringan : juga terbuka di jaringan lokal (bind $(envget BIND)) — siapa pun di jaringan ini bisa membukanya" ;; esac
   [ -f "$STATE/tunnel-url.txt" ] && alive "$(cat "$STATE/tunnel.pid" 2>/dev/null)" && say "  Publik   : $(cat "$STATE/tunnel-url.txt")"
@@ -190,10 +219,10 @@ start_server() {
     if port_busy "$port"; then port=$((port + 1)); continue; fi
     printf '\n[%s] start %s port %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rt" "$port" >>"$LOG"
     if [ "$rt" = node ]; then
-      KANTOR_PROJECT="$PROJECT" KANTOR_STORAGE="$STATE" KANTOR_PORT="$port" KANTOR_BIND="$BIND" \
+      KANTOR_PROJECT="$PROJECT" KANTOR_PROJECTS="$PROJECTS_NL" KANTOR_STORAGE="$STATE" KANTOR_PORT="$port" KANTOR_BIND="$BIND" \
         nohup node "$RUNTIME/bin/serve-node.mjs" </dev/null >>"$LOG" 2>&1 &
     else
-      KANTOR_PROJECT="$PROJECT" KANTOR_STORAGE="$STATE" \
+      KANTOR_PROJECT="$PROJECT" KANTOR_PROJECTS="$PROJECTS_NL" KANTOR_STORAGE="$STATE" \
         nohup php -d display_errors=stderr -S "$BIND:$port" -t "$RUNTIME/public" "$RUNTIME/public/index.php" </dev/null >>"$LOG" 2>&1 &
     fi
     pid=$!
@@ -233,8 +262,11 @@ case "$CMD" in
     if running; then print_running; say "  PID      : $(envget PID) · mulai $(envget STARTED)"
     else say "Kantor Agent tidak berjalan untuk project: $(basename "$PROJECT")"; say "  Mulai    : bash \"$RUNTIME/bin/kantor.sh\" start"; fi
     say "  Data     : $STATE"
+    printf '%s\n' "$PROJECTS_NL" | while IFS= read -r P; do
+    [ -z "$P" ] && continue
+    if [ "$MULTI" = 1 ]; then say "  Project  : $(basename "$P") ($P)"; fi
     if [ -f "$OPENCODE_DB_PATH" ]; then
-      say "  Sesi     : $(python3 -c "import sqlite3,sys;db=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True);print('sesi utama '+str(db.execute('SELECT COUNT(*) FROM session WHERE directory=? AND parent_id IS NULL',(sys.argv[2],)).fetchone()[0])+', subagent '+str(db.execute('SELECT COUNT(*) FROM session WHERE directory=? AND parent_id IS NOT NULL',(sys.argv[2],)).fetchone()[0]))" "$OPENCODE_DB_PATH" "$PROJECT" 2>/dev/null || echo 'tidak terbaca')"
+      say "  Sesi     : $(python3 -c "import sqlite3,sys;db=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True);print('sesi utama '+str(db.execute('SELECT COUNT(*) FROM session WHERE directory=? AND parent_id IS NULL',(sys.argv[2],)).fetchone()[0])+', subagent '+str(db.execute('SELECT COUNT(*) FROM session WHERE directory=? AND parent_id IS NOT NULL',(sys.argv[2],)).fetchone()[0]))" "$OPENCODE_DB_PATH" "$P" 2>/dev/null || echo 'tidak terbaca')"
     else say "  Sesi     : belum ada ($OPENCODE_DB_PATH)"; fi
     if [ -d "$KIRO_DIR" ]; then
       say "  Kiro     : $(python3 -c "
@@ -246,8 +278,9 @@ for f in glob.glob(sys.argv[1] + '/*.json'):
     if h.get('cwd') != sys.argv[2]: continue
     if h.get('session_created_reason') == 'subagent': k += 1
     else: m += 1
-print('sesi utama ' + str(m) + ', subagent ' + str(k))" "$KIRO_DIR" "$PROJECT" 2>/dev/null || echo 'tidak terbaca')"
-    else say "  Kiro     : belum ada ($KIRO_DIR)"; fi ;;
+print('sesi utama ' + str(m) + ', subagent ' + str(k))" "$KIRO_DIR" "$P" 2>/dev/null || echo 'tidak terbaca')"
+    else say "  Kiro     : belum ada ($KIRO_DIR)"; fi
+    done ;;
   tunnel)
     command -v cloudflared >/dev/null 2>&1 || die "cloudflared belum terpasang (macOS: brew install cloudflared · Linux: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)."
     running || QUIET=1 start_server
@@ -288,6 +321,7 @@ print('sesi utama ' + str(m) + ', subagent ' + str(k))" "$KIRO_DIR" "$PROJECT" 2
     command -v cloudflared >/dev/null 2>&1 && echo "  cloudflared ada (opsional, URL publik)" || echo "  cloudflared tidak ada (opsional)"
     command -v curl >/dev/null 2>&1 && echo "  curl        ada" || echo "  curl        tidak ada (dipakai Node/PHP sebagai gantinya)"
     echo "  project     $PROJECT"
+    if [ "$MULTI" = 1 ]; then printf '%s\n' "$PROJECTS_NL" | while IFS= read -r d; do echo "  project+    $d"; done; fi
     [ -f "$OPENCODE_DB_PATH" ] && echo "  opencode.db ada ($OPENCODE_DB_PATH)" || echo "  opencode.db belum ada ($OPENCODE_DB_PATH)"
     [ -d "$KIRO_DIR" ] && echo "  kiro sesi ada ($KIRO_DIR)" || echo "  kiro sesi belum ada ($KIRO_DIR)"
     echo "  data server $STATE" ;;

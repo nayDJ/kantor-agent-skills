@@ -12,10 +12,15 @@ final class KHttp
         'Content-Security-Policy' => "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     ];
 
-    /** @param array<string,mixed> $cfg @return array<string,mixed> */
-    public static function pageConfig(array $cfg): array
+    /** @param array<string,mixed> $cfg @param array<string,mixed> $extra @return array<string,mixed> */
+    public static function pageConfig(array $cfg, array $extra = []): array
     {
-        return ['title' => $cfg['title'], 'ketua' => $cfg['ketua'], 'team' => $cfg['team'], 'colors' => $cfg['colors'], 'spare_desks' => $cfg['spare_desks']];
+        return [
+            'title' => $cfg['title'], 'ketua' => $cfg['ketua'], 'team' => $cfg['team'], 'colors' => $cfg['colors'], 'spare_desks' => $cfg['spare_desks'],
+            'layout' => is_string($extra['layout'] ?? null) ? $extra['layout'] : $cfg['layout'],
+            'projects' => is_array($extra['projects'] ?? null) ? array_values($extra['projects']) : [],
+            'current' => is_string($extra['current'] ?? null) ? $extra['current'] : '',
+        ];
     }
 
     /** Perlindungan DNS rebinding — lihat lib/node/http.mjs. */

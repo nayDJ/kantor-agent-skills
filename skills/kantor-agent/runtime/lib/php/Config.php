@@ -65,6 +65,7 @@ final class KConfig
             'cooldown' => $num($d['cooldown'] ?? null, 60),
             'spare_desks' => $num($d['spare_desks'] ?? null, 4),
             'mains_max' => $num($d['mains_max'] ?? null, 40),
+            'layout' => ($c['layout'] ?? null) === 'pantai' ? 'pantai' : 'kantor',
         ];
     }
 

@@ -7,7 +7,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
-const API = '/kerja/api/state';
+const API_BASE = '/kerja/api/state';
 const POLL_MS = 3000;
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const CFG = window.KANTOR || {};
@@ -16,6 +16,42 @@ const KETUA_NAME = typeof CFG.ketua === 'string' ? CFG.ketua : 'Joko';
 const COLORS = CFG.colors || { ketua: '#6a55c9', team: ['#3f6fd1', '#2f9a6d', '#d9772f', '#c2417a'], freelancers: ['#0f8fa3'] };
 const NAMES_SIG = [KETUA_NAME, ...TEAM_NAMES].join('|');
 const SPARE = Math.max(0, Math.min(4, Number(CFG.spare_desks) || 4));
+// Bos keliling: ?project=<id> (lihat /kerja/api/projects), ?layout=kantor|pantai (override sesi, default dari config project)
+const QS = new URLSearchParams(location.search);
+const PROJ_Q = QS.get('project') || '';
+const LAYOUT = QS.get('layout') === 'pantai' ? 'pantai' : QS.get('layout') === 'kantor' ? 'kantor' : (CFG.layout === 'pantai' ? 'pantai' : 'kantor');
+const IS_PANTAI = LAYOUT === 'pantai';
+let seaMesh = null; // ponytail: satu-satunya animasi pantai — sisanya geometri statis.
+const API = API_BASE + (PROJ_Q ? `?project=${encodeURIComponent(PROJ_Q)}` : '');
+function gotoQS(patch) {
+  const q = new URLSearchParams(location.search);
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null || v === '') q.delete(k);
+    else q.set(k, v);
+  }
+  location.search = q.toString();
+}
+(function initHub() {
+  const sel = document.getElementById('projSel');
+  if (sel && Array.isArray(CFG.projects) && CFG.projects.length > 1) {
+    sel.hidden = false;
+    for (const p of CFG.projects) {
+      const o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = p.title;
+      if (p.id === CFG.current) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.addEventListener('change', () => gotoQS({ project: sel.value }));
+  }
+  const lb = document.getElementById('layoutBtn');
+  if (lb) {
+    lb.hidden = false;
+    lb.textContent = IS_PANTAI ? 'Kantor' : 'Pantai';
+    lb.title = IS_PANTAI ? 'Kembali ke kantor' : 'Pindah ke pantai';
+    lb.addEventListener('click', () => gotoQS({ layout: IS_PANTAI ? 'kantor' : 'pantai' }));
+  }
+})();
 
 // ---------------------------------------------------------------- bantuan umum
 const $ = (id) => document.getElementById(id);
@@ -204,6 +240,7 @@ const V = (x, z) => new THREE.Vector3(x, 0, z);
 const ROOM = { x0: -10, x1: 10, z0: -7, z1: 6, h: 5.2 };
 const CORRIDOR_Z = -2.1;
 (function buildRoom() {
+  if (IS_PANTAI) return; // pantai dibangun belakangan (butuh helper box/monitor yang didefinisikan di bawah)
   const fl = canvasTex(1024, 1024);
   const r = rng(11);
   const plankH = 64;
@@ -725,6 +762,15 @@ const LOUNGE_PADS = [];
   lounge.position.set(4.9, 0, 1.45);
   lounge.rotation.y = Math.PI;
   const fabric = mat('#6f8f86', 0.95);
+  if (IS_PANTAI) {
+    // beanbag, bukan sofa — posisi & sit('sofa') sama, mesh saja beda.
+    for (const s of [-1, 1]) {
+      const bag = mesh(new THREE.SphereGeometry(0.55, 18, 14), mat(s < 0 ? '#d9772f' : '#2f9a6d', 0.95));
+      bag.scale.y = 0.62;
+      bag.position.set(s * 0.62, 0.34, 0);
+      lounge.add(bag);
+    }
+  } else {
   const sofaBase = mesh(box(2.6, 0.42, 0.95, 0.12), fabric);
   sofaBase.position.set(0, 0.3, 0);
   const sofaBack = mesh(box(2.6, 0.62, 0.25, 0.1), fabric);
@@ -743,6 +789,7 @@ const LOUNGE_PADS = [];
   const low = mesh(box(1.2, 0.06, 0.6, 0.03), mat('#8c6a4f', 0.5));
   low.position.set(0, 0.42, 1.05);
   lounge.add(pillow, low);
+  }
   for (const [lx, lz] of [[-0.5, 0.8], [0.5, 0.8], [-0.5, 1.3], [0.5, 1.3]]) {
     const lg = mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.4, 8), mat('#3a3d44', 0.4, 0.5));
     lg.position.set(lx, 0.2, lz);
@@ -1199,7 +1246,100 @@ function buildDesk(def) {
   else if (def.kind === 'tim') drawPlate(d, TEAM_NAMES[def.idx], 'Tim', def.color);
   else drawPlate(d, `Meja cadangan ${def.idx + 1}`, 'Freelancer', def.color);
 }
-DESK_DEFS.forEach(buildDesk);
+function palm(x, z, s, lean) {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.z = lean;
+  const trunk = mesh(new THREE.CylinderGeometry(0.09 * s, 0.15 * s, 2.8 * s, 8), mat('#8a6238', 0.9));
+  trunk.position.y = 1.4 * s;
+  g.add(trunk);
+  const leafM = new THREE.MeshStandardMaterial({ color: '#3f8f4f', roughness: 0.9, side: THREE.DoubleSide });
+  for (let i = 0; i < 6; i++) {
+    const leaf = mesh(new THREE.PlaneGeometry(1.7 * s, 0.45 * s, 4, 1), leafM, { cast: false });
+    const a = (i / 6) * Math.PI * 2;
+    leaf.position.set(Math.cos(a) * 0.75 * s, 2.85 * s, Math.sin(a) * 0.75 * s);
+    leaf.rotation.y = -a + Math.PI / 2;
+    leaf.rotation.z = 0.5;
+    g.add(leaf);
+  }
+  const nut = mesh(new THREE.SphereGeometry(0.12 * s, 10, 8), mat('#6b4a2f', 0.9));
+  nut.position.set(0.15 * s, 2.7 * s, 0);
+  g.add(nut);
+  scene.add(g);
+}
+function buildPantaiShell() {
+  const sand = mesh(new THREE.CircleGeometry(34, 48).rotateX(-Math.PI / 2), mat('#e3cd9c', 1), { cast: false });
+  sand.position.set(0, 0, 0);
+  sand.receiveShadow = true;
+  scene.add(sand);
+  const sea = mesh(new THREE.PlaneGeometry(80, 16).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#2f9ec4', roughness: 0.35 }), { cast: false });
+  sea.position.set(0, 0.03, -17);
+  scene.add(sea);
+  seaMesh = sea;
+  const foam = mesh(new THREE.PlaneGeometry(80, 1.1).rotateX(-Math.PI / 2), mat('#eaf6f8', 0.6), { cast: false });
+  foam.position.set(0, 0.035, -9.4);
+  scene.add(foam);
+  const sun = mesh(new THREE.CircleGeometry(2.2, 32), new THREE.MeshBasicMaterial({ color: '#ffd76b', toneMapped: false }), { cast: false });
+  sun.position.set(-24, 15, -36);
+  scene.add(sun);
+  palm(-9.4, -6.0, 1.15, 0.12);
+  palm(9.4, -6.2, 1.0, -0.14);
+  palm(-9.6, 4.8, 0.85, 0.1);
+  const ball = mesh(new THREE.SphereGeometry(0.28, 16, 12), new THREE.MeshStandardMaterial({ color: '#e15f4e', roughness: 0.6 }));
+  ball.position.set(6.5, 0.28, 3.6);
+  scene.add(ball);
+}
+function buildTikar(def) {
+  const tikar = new THREE.Group();
+  tikar.position.set(def.x, 0, def.z);
+  scene.add(tikar);
+  const boss = def.kind === 'ketua';
+  const mat1 = mesh(box(2.3, 0.05, 1.5, 0.02), mat(boss ? '#c98f4e' : '#d9b96a', 0.9));
+  mat1.position.y = 0.025;
+  tikar.add(mat1);
+  const top = mesh(box(1.15, 0.05, 0.6, 0.02), mat('#a97c50', 0.7));
+  top.position.set(0, 0.32, -0.3);
+  tikar.add(top);
+  for (const s of [-1, 1]) {
+    const leg = mesh(box(0.05, 0.3, 0.5), mat('#8c6a4f', 0.7));
+    leg.position.set(s * 0.5, 0.16, -0.3);
+    tikar.add(leg);
+  }
+  const main = monitor(0.72, 0.45);
+  main.g.position.set(-0.2, 0.62, -0.35);
+  main.g.rotation.x = -0.08;
+  const side = monitor(0.6, 0.38);
+  side.g.position.set(0.45, 0.6, -0.3);
+  side.g.rotation.y = -0.3;
+  tikar.add(main.g, side.g);
+  const kelapa = mesh(new THREE.SphereGeometry(0.11, 12, 10), mat('#6b4a2f', 0.9));
+  kelapa.position.set(0.85, 0.42, 0.15);
+  tikar.add(kelapa);
+  const np = canvasTex(512, 128);
+  const plate = mesh(new THREE.PlaneGeometry(0.5, 0.125), new THREE.MeshStandardMaterial({ map: np.tex, roughness: 0.5 }), { cast: false });
+  plate.position.set(-0.8, 0.3, 0.45);
+  plate.rotation.x = -0.25;
+  const pole = mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.35, 6), mat('#8c6a4f', 0.7));
+  pole.position.set(-0.8, 0.15, 0.45);
+  tikar.add(plate, pole);
+  const lamp = new THREE.PointLight('#ffd9a0', 0, 5, 2);
+  lamp.position.set(0, 1.6, 0.3);
+  tikar.add(lamp);
+  const seat = new THREE.Group();
+  seat.position.set(def.x, 0, def.z + 0.95);
+  seat.rotation.y = Math.PI;
+  scene.add(seat);
+  const pouf = mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.5, 14), mat(boss ? '#8a5a3b' : '#3a6ea5', 0.95));
+  pouf.position.y = 0.25;
+  seat.add(pouf);
+  const d = { ...def, group: tikar, seat, main, side, deskMug: null, lamp, plate: np, data: null, who: null, sig: '', drawnAt: 0, plateSig: '' };
+  desks[def.id] = d;
+  if (def.kind === 'ketua') drawPlate(d, KETUA_NAME, 'Ketua · Pantai', def.color);
+  else if (def.kind === 'tim') drawPlate(d, TEAM_NAMES[def.idx], 'Tim · Pantai', def.color);
+  else drawPlate(d, `Tikar cadangan ${def.idx + 1}`, 'Freelancer', def.color);
+}
+if (IS_PANTAI) buildPantaiShell();
+DESK_DEFS.forEach(IS_PANTAI ? buildTikar : buildDesk);
 
 // ---------------------------------------------------------------- tempat & jalur (koridor z = −2.1 + "jari" ke tiap tempat)
 // Setiap tempat punya spoke: titik pertama di koridor, lalu titik-titik sampai posisi akhir. Rute A→B =
@@ -2229,6 +2369,7 @@ function frame() {
   }
   for (const d of Object.values(desks)) updateDeskScreens(d, now);
   if (!REDUCED) chatter(now);
+  if (seaMesh && !REDUCED) seaMesh.position.y = 0.03 + Math.sin(t * 0.7) * 0.035;
   // pintu terbuka saat ada yang dekat
   let near = false;
   for (const a of actors.values()) {

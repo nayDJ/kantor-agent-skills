@@ -154,6 +154,44 @@ if (up) {
   check('POST ditolak (405)', mp.status === 405 && mn.status === 405, `PHP ${mp.status} / Node ${mn.status}`);
   const [rp, rn] = await Promise.all([get(P, '/'), get(N, '/')]);
   check('/ → 302 /kerja', rp.status === 302 && rn.status === 302 && rp.headers.get('location') === '/kerja' && rn.headers.get('location') === '/kerja');
+
+  // multi-project: kedua server dengan KANTOR_PROJECTS yang sama (project berisi + project kosong)
+  const EMPTY = fs.mkdtempSync(path.join(os.tmpdir(), 'kantor-parity-empty-'));
+  const LIST = `${PROJECT}\n${EMPTY}`;
+  const PP2 = PHP_PORT + 10;
+  const NP2 = NODE_PORT + 10;
+  const phpErr2 = start('php', ['-S', `127.0.0.1:${PP2}`, '-t', 'public', 'public/index.php'], { KANTOR_PROJECTS: LIST });
+  const nodeErr2 = start(process.execPath, ['bin/serve-node.mjs'], { KANTOR_PORT: String(NP2), KANTOR_BIND: '127.0.0.1', KANTOR_PROJECTS: LIST });
+  const P2 = `http://127.0.0.1:${PP2}`;
+  const N2 = `http://127.0.0.1:${NP2}`;
+  const up2 = (await waitUp(P2, 'PHP-multi', phpErr2)) & (await waitUp(N2, 'Node-multi', nodeErr2));
+  if (up2) {
+    const [jp2, jn2] = [await (await get(P2, '/kerja/api/projects')).json(), await (await get(N2, '/kerja/api/projects')).json()];
+    const dp = diff(jp2, jn2);
+    check(`/kerja/api/projects identik (${jp2.projects?.length ?? 0} project)`, dp.length === 0, dp.join('; '));
+    const emptyId = jp2.projects?.[1]?.id;
+    check('projects berisi 2 entri + id 12 char', jp2.projects?.length === 2 && /^[0-9a-f]{12}$/.test(jp2.projects[0].id) && /^[0-9a-f]{12}$/.test(emptyId ?? ''));
+    if (emptyId) {
+      const [ep, en] = await Promise.all([get(P2, `/kerja/api/state?project=${emptyId}`), get(N2, `/kerja/api/state?project=${emptyId}`)]);
+      const [sp2, sn2] = [await ep.json(), await en.json()];
+      const de = diff(sp2, sn2, '$', new Set(['now']));
+      check('state project kosong identik', de.length === 0, de.slice(0, 10).join('; '));
+      const [wp, wn] = await Promise.all([get(P2, `/kerja?project=${emptyId}`), get(N2, `/kerja?project=${emptyId}`)]);
+      const [qp, qn] = [await wp.text(), await wn.text()];
+      check('/kerja?project= KANTOR identik', wp.status === 200 && wn.status === 200 && diff(cfgOf(qp), cfgOf(qn)).length === 0);
+      const [xp, xn] = await Promise.all([get(P2, `/kerja?project=junk&layout=junk`), get(N2, `/kerja?project=junk&layout=junk`)]);
+      const [yp, yn] = [await xp.text(), await xn.text()];
+      check('project/layout asing → default pertama + kantor', xp.status === 200 && JSON.stringify(cfgOf(yp)) === JSON.stringify(cfgOf(yn))
+        && cfgOf(yp)?.layout === 'kantor' && cfgOf(yp)?.projects?.length === 2);
+      const [gq, gk] = [await (await get(P2, '/kerja/api/ping')).json(), await (await get(N2, '/kerja/api/ping')).json()];
+      check('ping hub identik', gq.project === gk.project && gq.project !== jp2.projects[0].id);
+    }
+  }
+  try {
+    fs.rmSync(EMPTY, { recursive: true, force: true });
+  } catch {
+    /* abaikan */
+  }
 }
 
 cleanup();

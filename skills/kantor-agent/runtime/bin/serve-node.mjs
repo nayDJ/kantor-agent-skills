@@ -3,7 +3,8 @@
 //   /kerja  /kerja/api/state  /kerja/api/ping  /kerja/assets/<file.js>
 // Read-only: hanya membaca sesi OpenCode project (metadata tool; output tool tidak pernah dibaca).
 // Biasanya dijalankan lewat bin/kantor.sh start. Variabel lingkungan:
-//   KANTOR_PROJECT  folder project (default: folder kerja saat ini)   KANTOR_STORAGE  folder cache/pid (opsional)
+//   KANTOR_PROJECT  folder project (default: folder kerja saat ini)   KANTOR_PROJECTS folder-folder (newline-separated, multi)
+//   KANTOR_STORAGE  folder cache/pid (opsional)
 //   KANTOR_PORT     port (default 8788)   KANTOR_BIND  alamat (default 127.0.0.1)   KANTOR_ALLOWED_HOSTS  host tambahan
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -19,13 +20,24 @@ if (major < 18) {
 
 const RUNTIME = fs.realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'));
 const PUBLIC = path.join(RUNTIME, 'public');
-let PROJECT;
-try {
-  PROJECT = fs.realpathSync(process.env.KANTOR_PROJECT || process.cwd());
-} catch {
-  console.error(`[kantor] folder project tidak ditemukan: ${process.env.KANTOR_PROJECT}`);
-  process.exit(1);
-}
+// ponytail: KANTOR_PROJECTS (newline-separated, dari kantor.sh --project berulang) atau satu project seperti dulu.
+const PROJECTS = (() => {
+  const list = String(process.env.KANTOR_PROJECTS || '').split('\n').map((s) => s.trim()).filter((s) => s !== '');
+  const src = list.length ? list : [process.env.KANTOR_PROJECT || process.cwd()];
+  const out = [];
+  for (const p of src) {
+    try {
+      const rp = fs.realpathSync(p);
+      if (!out.includes(rp)) out.push(rp);
+    } catch {
+      console.error(`[kantor] folder project tidak ditemukan: ${p}`);
+      process.exit(1);
+    }
+  }
+  return out;
+})();
+const HUB_ID = crypto.createHash('md5').update(PROJECTS.join('\n')).digest('hex').slice(0, 12);
+const pidOf = (p) => crypto.createHash('md5').update(p).digest('hex').slice(0, 12);
 const STORAGE = process.env.KANTOR_STORAGE ? path.resolve(process.env.KANTOR_STORAGE) : null;
 const { loadConfig } = await import(new URL('../lib/node/config.mjs', import.meta.url));
 const { buildState } = await import(new URL('../lib/node/office.mjs', import.meta.url));
@@ -38,7 +50,7 @@ if (STORAGE) {
     /* cache opsional */
   }
 }
-const PROJECT_ID = crypto.createHash('md5').update(PROJECT).digest('hex').slice(0, 12);
+const PROJECT_ID = HUB_ID;
 const extraHosts = String(process.env.KANTOR_ALLOWED_HOSTS || '');
 
 const htmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
@@ -73,16 +85,41 @@ async function handle(req, res) {
       JSON.stringify({ app: 'kantor-agent', project: PROJECT_ID, runtime: 'node' }));
   }
   // config dibaca per permintaan supaya perubahan .opencode/kantor-agent.json langsung terpakai
-  const cfg = loadConfig(RUNTIME, PROJECT);
+  const pickProject = (url) => {
+    const q = (url.searchParams.get('project') || '').toLowerCase();
+    const i = PROJECTS.findIndex((d) => pidOf(d) === q);
+    const dir = PROJECTS[i >= 0 ? i : 0];
+    return { dir, id: pidOf(dir) };
+  };
+  const projectList = () => PROJECTS.map((dir) => {
+    let title;
+    try {
+      title = loadConfig(RUNTIME, dir).title;
+    } catch {
+      title = path.basename(dir);
+    }
+    return { id: pidOf(dir), title };
+  });
+  const layoutOf = (url, cfg) => {
+    const q = url.searchParams.get('layout');
+    return q === 'pantai' || q === 'kantor' ? q : cfg.layout;
+  };
+  if (p === '/kerja/api/projects') {
+    return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+      JSON.stringify({ app: 'kantor-agent', projects: projectList() }));
+  }
+  const { dir: PDIR } = pickProject(url);
+  const cfg = loadConfig(RUNTIME, PDIR);
   if (p === '/kerja') {
     const page = fs.readFileSync(path.join(RUNTIME, 'views', 'page.html'), 'utf8');
+    const list = PROJECTS.length > 1 ? projectList() : [];
     const html = page.replace(/\{\{TITLE\}\}|\{\{CONFIG_SCRIPT\}\}/g, (m) => (m === '{{TITLE}}'
       ? htmlEsc(cfg.title)
-      : `<script>window.KANTOR = ${scriptJson(pageConfig(cfg))};</script>`));
+      : `<script>window.KANTOR = ${scriptJson(pageConfig(cfg, { projects: list, current: pidOf(PDIR), layout: layoutOf(url, cfg) }))};</script>`));
     return send(res, 200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }, html);
   }
   if (p === '/kerja/api/state') {
-    const state = buildState({ projectDir: PROJECT, storageDir: STORAGE, cfg, now: Date.now() });
+    const state = buildState({ projectDir: PDIR, storageDir: STORAGE, cfg, now: Date.now() });
     return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, JSON.stringify(state));
   }
   if (p.startsWith('/kerja/assets/')) {

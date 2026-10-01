@@ -99,6 +99,19 @@ Kantor Agent berjalan (node) untuk project: toko-kue
 Buka URL itu di browser. Perintah lain: `… status`, `… stop`, `… restart`, `… url`, `… tunnel` (URL publik),
 `… tunnel-stop`, `… detect`.
 
+## Multi-project: Bos keliling
+Satu server bisa memantau beberapa project sekaligus — `--project` boleh diulang:
+```bash
+bash <skill-dir>/runtime/bin/kantor.sh start --project ~/toko-kue --project ~/bengkel-motor
+```
+Di halaman ada dropdown **"Bos mengunjungi"**: pilih project, seluruh kantor (tim, aktivitas, riwayat) ganti ke
+project itu. Tiap project memakai config `.opencode/kantor-agent.json`-nya masing-masing.
+
+## Layout pantai
+Tiap project bisa tampil sebagai pantai sederhana, bukan kantor: tombol **Pantai/Kantor** di bar atas (override
+sesi via `?layout=`), atau permanen lewat config: `{"layout": "pantai"}` di `.opencode/kantor-agent.json`.
+Meja jadi tikar + laptop + kelapa, sofa jadi beanbag — logika aktor, feed, dan panel tetap sama.
+
 ## Cara kerja
 ```text
 OpenCode:  ~/.local/share/opencode/opencode.db (OPENCODE_DB)                  sesi parent_id NULL → Ketua
@@ -112,8 +125,9 @@ skills/kantor-agent/runtime/   (dijalankan langsung dari folder skill — tidak 
   bin/kantor.sh ── pilih runtime & port bebas ──┬─ Node:  bin/serve-node.mjs + lib/node/*.mjs
                                                  └─ PHP:   php -S … public/index.php + lib/php/*.php
          │  cache, PID, log → ~/.cache/kantor-agent/<slug-project>/
-         ├── GET /kerja            halaman (views/page.html)
-         ├── GET /kerja/api/state  JSON status, dipolling tiap 3 detik
+         ├── GET /kerja[?project=id&layout=pantai] halaman (views/page.html)
+         ├── GET /kerja/api/projects daftar project (multi)
+         ├── GET /kerja/api/state[?project=id] JSON status, dipolling tiap 3 detik
          ├── GET /kerja/api/ping   identitas server (untuk start/stop idempoten)
          └── GET /kerja/assets/*   three.js r170 (vendored) + kantor.js
          ▼
