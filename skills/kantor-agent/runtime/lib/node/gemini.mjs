@@ -221,6 +221,7 @@ export class Gemini {
       return {
         ...this.view(s),
         session: s.sid !== null ? s.sid : basename(f).replace(/\.(jsonl|json)$/, ''),
+        provider: 'gemini',
         agentType: 'general-purpose',
         description: s.summary !== '' ? safeLine(s.summary, 140) : '',
       };
@@ -244,6 +245,7 @@ export class Gemini {
           ...this.view(s),
           id: sid,
           session: n,
+          provider: 'gemini',
           agentType: 'general-purpose',
           description: s.summary !== '' ? safeLine(s.summary, 140) : '',
           parentAgent: n,

@@ -191,6 +191,7 @@ final class KKiro
             $agent = self::agentName($h) ?? 'general-purpose';
             $item = $sum + [
                 'session' => (string) $h['session_id'],
+                'provider' => 'kiro',
                 'agentType' => KUtil::clip($agent, 40),
                 'description' => is_string($h['title'] ?? null) ? KUtil::safeLine((string) $h['title'], 140) : '',
             ];

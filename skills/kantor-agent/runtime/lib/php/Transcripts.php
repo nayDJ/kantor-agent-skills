@@ -127,6 +127,7 @@ final class KTranscripts
                 $sum = $this->summarize($db, $r);
                 $item = $sum + [
                     'session' => $r['parent_id'] ?? $r['id'],
+                    'provider' => 'opencode',
                     'agentType' => is_string($r['agent'] ?? null) && trim((string) $r['agent']) !== '' ? KUtil::clip(trim((string) $r['agent']), 40) : 'general-purpose',
                     'description' => is_string($r['title'] ?? null) ? KUtil::safeLine((string) $r['title'], 140) : '',
                 ];

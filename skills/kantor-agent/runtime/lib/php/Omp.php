@@ -233,6 +233,7 @@ final class KOmp
             $s = $this->state($f);
             $mains[] = $this->view($s) + [
                 'session' => $s['sid'] !== null ? $s['sid'] : self::idFromName($f),
+                'provider' => 'omp',
                 'agentType' => 'general-purpose',
                 'description' => $s['title'] !== '' ? KUtil::safeLine($s['title'], 140) : '',
             ];
@@ -257,6 +258,7 @@ final class KOmp
                 $runs[] = $this->view($s) + [
                     'id' => $s['sid'] !== null ? $s['sid'] : $agent,
                     'session' => $parentSid,
+                    'provider' => 'omp',
                     'agentType' => KUtil::clip($agent, 40) !== '' ? KUtil::clip($agent, 40) : 'general-purpose',
                     'description' => $s['title'] !== '' ? KUtil::safeLine($s['title'], 140) : '',
                     'parentAgent' => $parentSid,

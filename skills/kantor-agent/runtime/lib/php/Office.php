@@ -160,6 +160,7 @@ final class KOffice
             return [
                 'id' => $r['id'],
                 'agent_type' => $r['agentType'],
+                'provider' => $r['provider'],
                 'task' => $task($r),
                 'status' => $lastJob ? $r['status'] : 'selesai',
                 'reason' => $lastJob ? $r['reason'] : null,
@@ -241,6 +242,7 @@ final class KOffice
             'state' => $dm ? $states[$di][0] : 'santai',
             'activity' => $dm ? $states[$di][1] : null,
             'session' => $dm ? substr($dm['session'], 0, 8) : null,
+            'provider' => $dm ? ($dm['provider'] ?? null) : null,
             'updated' => $dm ? $dm['updated'] : null,
             'last' => $dm ? array_slice(array_values(array_filter(array_reverse($dm['events']), static fn($e) => $e['kind'] !== 'text' && $e['tool'] !== 'Agent' && $e['tool'] !== 'Task')), 0, 8) : [],
             'tools' => $dm ? $dm['tools'] : 0,
@@ -254,8 +256,12 @@ final class KOffice
         // ---- feed
         $K = ['key' => 'ketua', 'name' => $cfg['ketua'], 'label' => $cfg['ketua'], 'color' => $ketuaColor];
         $feed = [];
-        $add = static function (string $t, int $ms, array $who, string $kind, string $text, ?string $tool) use (&$feed): void {
-            $feed[] = ['ms' => $ms, 'i' => count($feed), 'e' => ['t' => $t, 'who' => $who['key'], 'name' => $who['label'], 'color' => $who['color'], 'kind' => $kind, 'text' => $text, 'tool' => $tool]];
+        $add = static function (string $t, int $ms, array $who, string $kind, string $text, ?string $tool, ?string $provider = null) use (&$feed): void {
+            $e = ['t' => $t, 'who' => $who['key'], 'name' => $who['label'], 'color' => $who['color'], 'kind' => $kind, 'text' => $text, 'tool' => $tool];
+            if ($provider !== null) {
+                $e['provider'] = $provider;
+            }
+            $feed[] = ['ms' => $ms, 'i' => count($feed), 'e' => $e];
         };
         foreach ($mains as $m) {
             foreach ($m['events'] as $e) {
@@ -273,9 +279,9 @@ final class KOffice
             if ($job['k'] === 0) {
                 $pi = $r['parentAgent'] !== null ? ($byId[$r['parentAgent']] ?? null) : null;
                 $req = $pi !== null ? $charInfo($charOf[$runs[$pi]['id']], $runs[$pi]) : $K;
-                $add($job['startIso'], $job['start'], $req, 'assign', $req['label'] . ' meminta ' . $who['label'] . ': ' . $task($r), null);
+                $add($job['startIso'], $job['start'], $req, 'assign', $req['label'] . ' meminta ' . $who['label'] . ': ' . $task($r), null, $r['provider']);
             } else {
-                $add($job['startIso'], $job['start'], $who, 'resume', $who['label'] . ' melanjutkan: ' . $task($r), null);
+                $add($job['startIso'], $job['start'], $who, 'resume', $who['label'] . ' melanjutkan: ' . $task($r), null, $r['provider']);
             }
             if ($job['end'] !== null && $job['end'] <= $now) {
                 $lastJob = count($r['effSegs']) - 1 === $job['k'];
@@ -287,7 +293,7 @@ final class KOffice
                 } elseif ($lastJob && $r['reason'] === 'tidak-aktif') {
                     $text = $who['label'] . ' berhenti — tidak ada aktivitas ' . (int) round($cfg['running_window'] / 60) . ' menit';
                 }
-                $add($job['endIso'], $job['end'], $who, 'done', $text, null);
+                $add($job['endIso'], $job['end'], $who, 'done', $text, null, $r['provider']);
             }
         }
         foreach ($runs as $r) {
@@ -321,7 +327,7 @@ final class KOffice
             $who = $charInfo($job['who'], $r);
             $histOut[] = [
                 'id' => $r['id'], 'who' => $who['key'], 'name' => $who['name'], 'label' => $who['label'], 'color' => $who['color'],
-                'kind' => $job['who']['kind'] === 'pool' ? 'tim' : 'freelancer', 'agent_type' => $r['agentType'], 'task' => $task($r),
+                'kind' => $job['who']['kind'] === 'pool' ? 'tim' : 'freelancer', 'agent_type' => $r['agentType'], 'provider' => $r['provider'], 'task' => $task($r),
                 'status' => $r['status'], 'started' => $r['started'], 'ended' => $job['end'] === null ? null : $job['endIso'], 'tools' => $r['tools'],
                 'tokens' => $r['tokens'],
             ];
@@ -543,7 +549,7 @@ final class KOffice
             $who = $charInfo($job['who'], $r);
             $out[] = [
                 'id' => $r['id'], 'who' => $who['key'], 'name' => $who['name'], 'label' => $who['label'], 'color' => $who['color'],
-                'kind' => $job['who']['kind'] === 'pool' ? 'tim' : 'freelancer', 'agent_type' => $r['agentType'], 'task' => $task($r),
+                'kind' => $job['who']['kind'] === 'pool' ? 'tim' : 'freelancer', 'agent_type' => $r['agentType'], 'provider' => $r['provider'], 'task' => $task($r),
                 'status' => $r['status'], 'started' => $r['started'], 'ended' => $job['end'] === null ? null : $job['endIso'], 'tools' => $r['tools'],
                 'tokens' => $r['tokens'],
             ];

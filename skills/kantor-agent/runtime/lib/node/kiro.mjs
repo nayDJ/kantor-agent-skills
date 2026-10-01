@@ -116,6 +116,7 @@ export class Kiro {
       const item = {
         ...sum,
         session: String(h.session_id),
+        provider: 'kiro',
         agentType: clip(agentName(h) ?? 'general-purpose', 40),
         description: typeof h.title === 'string' ? safeLine(h.title, 140) : '',
       };

@@ -309,6 +309,7 @@ final class KGemini
             $s = $this->state($f);
             $mains[] = $this->view($s) + [
                 'session' => $s['sid'] !== null ? $s['sid'] : self::stripExt(self::basename($f)),
+                'provider' => 'gemini',
                 'agentType' => 'general-purpose',
                 'description' => $s['summary'] !== '' ? KUtil::safeLine($s['summary'], 140) : '',
             ];
@@ -339,6 +340,7 @@ final class KGemini
                 $runs[] = $this->view($s) + [
                     'id' => $sid,
                     'session' => $n,
+                    'provider' => 'gemini',
                     'agentType' => 'general-purpose',
                     'description' => $s['summary'] !== '' ? KUtil::safeLine($s['summary'], 140) : '',
                     'parentAgent' => $n,

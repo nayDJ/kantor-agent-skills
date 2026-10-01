@@ -127,6 +127,23 @@ if (up) {
   const [hpqj, hnqj] = [await hpq.json(), await hnq.json()];
   const dhq = diff(hpqj, hnqj);
   check(`history ?q=${word} memfilter identik`, hpq.status === 200 && dhq.length === 0 && (hpqj.runs?.length ?? 0) <= (hp0j.runs?.length ?? 0), dhq.slice(0, 10).join('; '));
+  const PROV = new Set(['opencode', 'kiro', 'claude', 'omp', 'gemini']);
+  const provBad = [];
+  const checkRuns = (runs, where) => {
+    for (const [i, r] of (runs ?? []).entries()) if (!PROV.has(r?.provider)) provBad.push(`${where}[${i}].provider=${JSON.stringify(r?.provider)}`);
+  };
+  const checkKetua = (k, where) => {
+    if (k?.session == null) { if (k?.provider !== null) provBad.push(`${where}.ketua.provider harus null`); }
+    else if (!PROV.has(k?.provider)) provBad.push(`${where}.ketua.provider=${JSON.stringify(k?.provider)}`);
+  };
+  const checkEmbedded = (s, where) => {
+    for (const m of [...(s.team ?? []), ...(s.freelancers ?? [])]) if (m?.run != null && !PROV.has(m.run?.provider)) provBad.push(`${where}.${m.key}.run.provider=${JSON.stringify(m.run?.provider)}`);
+  };
+  checkRuns(sp.runs, 'state-php'); checkRuns(sn.runs, 'state-node');
+  checkKetua(sp.ketua, 'state-php'); checkKetua(sn.ketua, 'state-node');
+  checkEmbedded(sp, 'state-php'); checkEmbedded(sn, 'state-node');
+  checkRuns(hp0j.runs, 'history-php'); checkRuns(hn0j.runs, 'history-node');
+  check('provider valid di state & history (runs+ketua)', provBad.length === 0, provBad.slice(0, 10).join('; '));
 
   const [hp, hn] = await Promise.all([get(P, '/kerja'), get(N, '/kerja')]);
   const [tp, tn] = [await hp.text(), await hn.text()];

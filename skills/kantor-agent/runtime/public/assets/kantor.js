@@ -131,6 +131,17 @@ const RUN_UI = {
   terhenti: { label: 'Terhenti', css: '#c46a1c' },
   limit: { label: 'Limit', css: '#c43d3d' },
 };
+// ponytail: provider tampil apa adanya; asing/kosong disembunyikan
+const PROV = new Set(['opencode', 'kiro', 'claude', 'omp', 'gemini']);
+const provOk = (p) => typeof p === 'string' && PROV.has(p);
+const provSuffix = (p) => (provOk(p) ? ` · ${p}` : '');
+const provChip = (p) => (provOk(p) ? `<span class="chip">${esc(p)}</span>` : '');
+function tagHtml(name, role, kind, provider) {
+  const suf = provSuffix(provider);
+  return kind === 'freelancer'
+    ? `<div class="tag"><small>Freelancer${esc(suf)} ·</small> ${esc(name)}</div>`
+    : `<div class="tag">${esc(name)} <small>· ${esc(role)}${esc(suf)}</small></div>`;
+}
 const TODO_STATUS = {
   pending: { label: 'Rencana', css: '#9a938a', note: '#fff1a8' },
   in_progress: { label: 'Dikerjakan', css: '#2f9a6d', note: '#c9ecd6' },
@@ -1486,9 +1497,7 @@ function makeActor(def) {
   const el = document.createElement('div');
   el.className = 'person';
   el.style.setProperty('--c', def.color);
-  el.innerHTML = def.kind === 'freelancer'
-    ? `<div class="bubble hide"></div><div class="tag"><small>Freelancer ·</small> ${esc(def.name)}</div>`
-    : `<div class="bubble hide"></div><div class="tag">${esc(def.name)} <small>· ${esc(def.role)}</small></div>`;
+  el.innerHTML = `<div class="bubble hide"></div>${tagHtml(def.name, def.role, def.kind, null)}`;
   const label = new CSS2DObject(el);
   scene.add(label);
   const a = {
@@ -1880,9 +1889,9 @@ function updateDeskScreens(d, now) {
   let sig;
   if (d.kind === 'ketua') {
     const k = a.data;
-    sig = JSON.stringify([k?.state, k?.last?.[0]?.t, k?.tools, k?.todos?.at, a.walking, workMode(a)]);
+    sig = JSON.stringify([k?.state, k?.last?.[0]?.t, k?.tools, k?.todos?.at, k?.provider, a.walking, workMode(a)]);
   } else if (a) {
-    sig = JSON.stringify([a.key, a.data?.state, a.data?.run?.id, a.data?.run?.last?.[0]?.t, a.data?.run?.tools, workMode(a)]);
+    sig = JSON.stringify([a.key, a.data?.state, a.data?.run?.id, a.data?.run?.last?.[0]?.t, a.data?.run?.tools, a.data?.run?.provider, workMode(a)]);
   } else sig = `idle:${d.kind === 'tim' ? JSON.stringify([TEAM[d.idx].data?.state, TEAM[d.idx].data?.run?.id]) : ''}`;
   if (sig === d.sig && now - d.drawnAt < 20000) return;
   d.sig = sig;
@@ -1892,7 +1901,7 @@ function updateDeskScreens(d, now) {
     if (k.state === 'bekerja' || k.state === 'selesai') {
       const mode = workMode(a);
       const title = k.activity === 'menunggu-tim' ? `Menunggu ${k.waiting_on} subagent` : 'Sesi utama';
-      drawWorkScreen(d.main.scr, a, k.last, title, `${a.name} · ${STATE_UI[k.state]?.label || ''} · ${fmtNum.format(k.tools || 0)} aksi · ${fmtCompact.format(k.tokens || 0)} token`, mode);
+      drawWorkScreen(d.main.scr, a, k.last, title, `${a.name} · ${STATE_UI[k.state]?.label || ''} · ${fmtNum.format(k.tools || 0)} aksi · ${fmtCompact.format(k.tokens || 0)} token${provSuffix(k.provider)}`, mode);
     } else drawIdleScreen(d.main.scr, `${a.name} · Santai`, k.updated ? `aktif terakhir ${ago(k.updated)}` : 'belum ada sesi', a.color, false);
     drawTodoScreen(d.side.scr, k.todos);
     return;
@@ -1900,7 +1909,7 @@ function updateDeskScreens(d, now) {
   if (a && a.data?.run && a.work) {
     const r = a.data.run;
     const mode = workMode(a);
-    drawWorkScreen(d.main.scr, a, r.last, r.task, `${a.name} · ${r.agent_type} · ${fmtNum.format(r.tools)} aksi · ${fmtCompact.format(r.tokens)} token`, mode);
+    drawWorkScreen(d.main.scr, a, r.last, r.task, `${a.name} · ${r.agent_type} · ${fmtNum.format(r.tools)} aksi · ${fmtCompact.format(r.tokens)} token${provSuffix(r.provider)}`, mode);
     drawTaskCard(d.side.scr, a, r);
     return;
   }
@@ -2265,7 +2274,7 @@ function histFillOpts(list) {
   }
   if (k) {
     const cur = k.value;
-    const kinds = [...new Set((list || []).map((r) => r.agent_type).filter(Boolean))].sort();
+    const kinds = [...new Set([...(list || []).map((r) => r.agent_type).filter(Boolean), ...(list || []).map((r) => r.provider).filter(provOk)])].sort();
     k.innerHTML = '<option value="">Semua jenis</option>' + kinds.map((n) => `<option value="${esc(n)}">${esc(clip(n, 18))}</option>`).join('');
     if (kinds.includes(cur)) k.value = cur;
   }
@@ -2277,7 +2286,7 @@ function histFiltered() {
   return src.filter((r) => {
     if (v.who && (r.name || r.who) !== v.who) return false;
     if (v.status && r.status !== v.status) return false;
-    if (v.kind && r.agent_type !== v.kind) return false;
+    if (v.kind && r.agent_type !== v.kind && r.provider !== v.kind) return false;
     if (v.since && String(r.started || '').slice(0, 10) < v.since) return false;
     if (ql && !`${r.task || ''} ${r.label || ''}`.toLowerCase().includes(ql)) return false;
     return true;
@@ -2294,11 +2303,11 @@ function histRender() {
   if (HIST.loading) { body.innerHTML = '<div class="empty">Memuat…</div>'; return; }
   if (HIST.err) { body.innerHTML = `<div class="empty">${esc(HIST.err)}</div>`; return; }
   if (!list.length) { body.innerHTML = '<div class="empty">Tidak ada riwayat yang cocok.</div>'; return; }
-  body.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--muted);text-align:left;font-size:11px"><th style="padding:4px 6px;font-weight:600">Waktu</th><th style="padding:4px 6px;font-weight:600">Siapa</th><th style="padding:4px 6px;font-weight:600">Tugas</th><th style="padding:4px 6px;font-weight:600">Status</th><th style="padding:4px 6px;font-weight:600;text-align:right">Alat</th><th style="padding:4px 6px;font-weight:600;text-align:right">Token</th></tr></thead><tbody>`
+  body.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--muted);text-align:left;font-size:11px"><th style="padding:4px 6px;font-weight:600">Waktu</th><th style="padding:4px 6px;font-weight:600">Siapa</th><th style="padding:4px 6px;font-weight:600">Tugas</th><th style="padding:4px 6px;font-weight:600">Status</th><th style="padding:4px 6px;font-weight:600">Provider</th><th style="padding:4px 6px;font-weight:600;text-align:right">Alat</th><th style="padding:4px 6px;font-weight:600;text-align:right">Token</th></tr></thead><tbody>`
     + list.slice(0, 200).map((r) => {
       const ui = RUN_UI[r.status] || RUN_UI.selesai;
       const nm = r.name || r.who || '?';
-      return `<tr style="border-top:1px solid var(--line)"><td style="padding:5px 6px;white-space:nowrap;font-family:var(--mono);font-size:11px" title="${esc(r.started || '')}">${esc(hhmm(r.started))}</td><td style="padding:5px 6px;white-space:nowrap;max-width:88px;overflow:hidden;text-overflow:ellipsis"><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${esc(r.color || '#888')};margin-right:5px"></i>${esc(clip(nm, 14))}</td><td style="padding:5px 6px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.task || '')}">${esc(clip(r.task || '—', 52))}</td><td style="padding:5px 6px"><span class="chip" style="color:${ui.css}"><i></i>${esc(ui.label)}</span></td><td style="padding:5px 6px;text-align:right;font-family:var(--mono)">${esc(fmtNum.format(r.tools || 0))}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono)">${esc(fmtCompact.format(r.tokens || 0))}</td></tr>`;
+      return `<tr style="border-top:1px solid var(--line)"><td style="padding:5px 6px;white-space:nowrap;font-family:var(--mono);font-size:11px" title="${esc(r.started || '')}">${esc(hhmm(r.started))}</td><td style="padding:5px 6px;white-space:nowrap;max-width:88px;overflow:hidden;text-overflow:ellipsis"><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${esc(r.color || '#888')};margin-right:5px"></i>${esc(clip(nm, 14))}</td><td style="padding:5px 6px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.task || '')}">${esc(clip(r.task || '—', 52))}</td><td style="padding:5px 6px"><span class="chip" style="color:${ui.css}"><i></i>${esc(ui.label)}</span></td><td style="padding:5px 6px;white-space:nowrap">${provOk(r.provider) ? esc(r.provider) : '—'}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono)">${esc(fmtNum.format(r.tools || 0))}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono)">${esc(fmtCompact.format(r.tokens || 0))}</td></tr>`;
     }).join('') + `</tbody></table>`;
 }
 async function histFetch() {
@@ -2439,18 +2448,18 @@ function renderUi(d, fresh) {
   const kSub = k.other_sessions > 0 ? `+${k.other_sessions} sesi lain aktif`
     : k.activity === 'menunggu-tim' ? `Menunggu ${k.waiting_on} subagent`
       : k.state === 'santai' ? kLast : k.last?.[0]?.text || kLast;
-  const cards = [cardHtml({ key: 'ketua', name: KETUA_NAME, role: 'Ketua', color: COLORS.ketua, state: k.state, task: k.state === 'santai' ? 'Santai di lounge' : k.activity === 'alat' ? 'Menjalankan alat' : 'Sesi utama', act: kSub, working: k.state === 'bekerja' })];
+  const cards = [cardHtml({ key: 'ketua', name: KETUA_NAME, role: 'Ketua', color: COLORS.ketua, state: k.state, task: k.state === 'santai' ? 'Santai di lounge' : k.activity === 'alat' ? 'Menjalankan alat' : 'Sesi utama', act: kSub, working: k.state === 'bekerja', provider: k.provider })];
   for (const m of d.team) {
     const r = m.run;
     const task = m.state === 'santai' ? (r ? `Terakhir: ${r.task}` : 'Santai di lounge') : r?.task || '';
     const act = m.state === 'bekerja' ? r?.last?.[0]?.text || 'Mulai bekerja…' : m.state === 'selesai' ? `Beres ${ago(r?.ended)}` : r ? `selesai ${ago(r.ended)}` : 'menunggu tugas';
-    cards.push(cardHtml({ key: m.key, name: m.name, role: 'Tim', color: m.color, state: m.state, task, act, working: m.state === 'bekerja' }));
+    cards.push(cardHtml({ key: m.key, name: m.name, role: 'Tim', color: m.color, state: m.state, task, act, working: m.state === 'bekerja', provider: r?.provider }));
   }
   const seated = d.freelancers.filter((f) => f.desk !== null && f.desk < SPARE);
   const extra = d.freelancers.filter((f) => f.desk === null || f.desk >= SPARE);
   for (const f of seated) {
     const act = f.state === 'bekerja' ? f.run?.last?.[0]?.text || 'Mulai bekerja…' : 'Beres, pamit pulang';
-    cards.push(cardHtml({ key: f.key, name: f.name, role: 'Freelancer', color: f.color, state: f.state, task: f.run?.task || '', act, working: f.state === 'bekerja' }));
+    cards.push(cardHtml({ key: f.key, name: f.name, role: 'Freelancer', color: f.color, state: f.state, task: f.run?.task || '', act, working: f.state === 'bekerja', provider: f.run?.provider }));
   }
   if (extra.length) {
     const title = extra.map((f) => `Freelancer · ${f.name} — ${STATE_UI[f.state]?.label || f.state}: ${f.run?.task || ''}`).join('\n');
@@ -2463,8 +2472,8 @@ function renderUi(d, fresh) {
   const html = cards.join('');
   if (el.innerHTML !== html) el.innerHTML = html;
 }
-function cardHtml({ key, name, role, color, state, task, act, working }) {
-  return `<button type="button" class="card card-ui${working ? ' working' : ''}${role === 'Freelancer' ? ' fl' : ''}" data-focus="${esc(key)}" style="--c:${esc(color)}"><span class="ava">${esc(initial(name))}</span><div class="h"><span class="nm">${esc(name)}</span><span class="role">${esc(role)}</span>${stateChip(state)}</div><div class="task" title="${esc(task)}">${esc(task || '—')}</div><div class="act" title="${esc(act)}">${esc(act || '—')}</div></button>`;
+function cardHtml({ key, name, role, color, state, task, act, working, provider }) {
+  return `<button type="button" class="card card-ui${working ? ' working' : ''}${role === 'Freelancer' ? ' fl' : ''}" data-focus="${esc(key)}" style="--c:${esc(color)}"><span class="ava">${esc(initial(name))}</span><div class="h"><span class="nm">${esc(name)}</span><span class="role">${esc(role)}</span>${provChip(provider)}${stateChip(state)}</div><div class="task" title="${esc(task)}">${esc(task || '—')}</div><div class="act" title="${esc(act)}">${esc(act || '—')}</div></button>`;
 }
 
 // ---------------------------------------------------------------- interaksi
@@ -2693,6 +2702,16 @@ function updateActor(a, dt, t, now) {
   const bx0 = roomOf(a)?.bounds?.x0 ?? ROOM.x0;
   const outside = tmpV.x < bx0 - 0.05;
   a.el.classList.toggle('out', outside);
+  // ponytail: provider di tag nama, asing/kosong disembunyikan
+  {
+    const pv = a.kind === 'ketua' ? a.data?.provider : a.data?.run?.provider;
+    const ps = provOk(pv) ? pv : '';
+    if (ps !== a._provSig) {
+      a._provSig = ps;
+      const tag = a.el.querySelector('.tag');
+      if (tag) tag.outerHTML = tagHtml(a.name, a.role, a.kind, ps || null);
+    }
+  }
   let text = '';
   let cls = '';
   if (now < a.bubble.until) {

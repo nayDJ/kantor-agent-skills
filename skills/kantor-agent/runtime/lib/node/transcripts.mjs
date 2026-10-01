@@ -123,6 +123,7 @@ export class Transcripts {
         const item = {
           ...sum,
           session: r.parent_id ?? r.id,
+          provider: 'opencode',
           agentType: typeof r.agent === 'string' && phpTrim(r.agent) !== '' ? clip(phpTrim(r.agent), 40) : 'general-purpose',
           description: typeof r.title === 'string' ? safeLine(r.title, 140) : '',
         };

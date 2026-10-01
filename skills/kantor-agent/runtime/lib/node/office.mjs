@@ -130,6 +130,7 @@ export function buildState({ projectDir, storageDir, cfg, now }) {
     return {
       id: r.id,
       agent_type: r.agentType,
+      provider: r.provider,
       task: task(r),
       status: lastJob ? r.status : 'selesai',
       reason: lastJob ? r.reason : null,
@@ -181,6 +182,7 @@ export function buildState({ projectDir, storageDir, cfg, now }) {
     state: dm ? states[di][0] : 'santai',
     activity: dm ? states[di][1] : null,
     session: dm ? dm.session.slice(0, 8) : null,
+    provider: dm ? dm.provider ?? null : null,
     updated: dm ? dm.updated : null,
     last: dm ? [...dm.events].reverse().filter((e) => e.kind !== 'text' && e.tool !== 'Agent' && e.tool !== 'Task').slice(0, 8) : [],
     tools: dm ? dm.tools : 0,
@@ -194,7 +196,11 @@ export function buildState({ projectDir, storageDir, cfg, now }) {
   // ---- feed
   const K = { key: 'ketua', name: cfg.ketua, label: cfg.ketua, color: ketuaColor };
   const feed = [];
-  const add = (t, ms, who, kind, text, tool) => feed.push({ ms, e: { t, who: who.key, name: who.label, color: who.color, kind, text, tool } });
+  const add = (t, ms, who, kind, text, tool, provider) => {
+    const e = { t, who: who.key, name: who.label, color: who.color, kind, text, tool };
+    if (provider !== undefined) e.provider = provider;
+    feed.push({ ms, e });
+  };
   for (const m of mains) {
     for (const e of m.events) {
       if (e.kind === 'text' || e.tool === 'Agent' || e.tool === 'Task') continue;
@@ -207,9 +213,9 @@ export function buildState({ projectDir, storageDir, cfg, now }) {
     if (job.k === 0) {
       const parent = r.parentAgent !== null && byId.has(r.parentAgent) ? byId.get(r.parentAgent) : null;
       const req = parent !== null ? charInfo(charOf.get(parent.id), parent) : K;
-      add(job.startIso, job.start, req, 'assign', `${req.label} meminta ${who.label}: ${task(r)}`, null);
+      add(job.startIso, job.start, req, 'assign', `${req.label} meminta ${who.label}: ${task(r)}`, null, r.provider);
     } else {
-      add(job.startIso, job.start, who, 'resume', `${who.label} melanjutkan: ${task(r)}`, null);
+      add(job.startIso, job.start, who, 'resume', `${who.label} melanjutkan: ${task(r)}`, null, r.provider);
     }
     if (job.end !== null && job.end <= now) {
       const lastJob = r.effSegs.length - 1 === job.k;
@@ -217,7 +223,7 @@ export function buildState({ projectDir, storageDir, cfg, now }) {
       if (lastJob && r.status === 'limit') text = `${who.label} jeda — limit pemakaian`;
       else if (lastJob && r.reason === 'dihentikan') text = `${who.label} dihentikan: ${task(r)}`;
       else if (lastJob && r.reason === 'tidak-aktif') text = `${who.label} berhenti — tidak ada aktivitas ${Math.round(cfg.running_window / 60)} menit`;
-      add(job.endIso, job.end, who, 'done', text, null);
+      add(job.endIso, job.end, who, 'done', text, null, r.provider);
     }
   }
   const jobsOf = new Map();
@@ -249,7 +255,7 @@ export function buildState({ projectDir, storageDir, cfg, now }) {
     const who = charInfo(job.who, r);
     return {
       id: r.id, who: who.key, name: who.name, label: who.label, color: who.color, kind: job.who.kind === 'pool' ? 'tim' : 'freelancer',
-      agent_type: r.agentType, task: task(r), status: r.status, started: r.started, ended: job.end === null ? null : job.endIso, tools: r.tools, tokens: r.tokens,
+      agent_type: r.agentType, provider: r.provider, task: task(r), status: r.status, started: r.started, ended: job.end === null ? null : job.endIso, tools: r.tools, tokens: r.tokens,
     };
   });
   const recent = runs.filter((r) => now - tsMs(r.started) <= 48 * 3600 * 1000).map((r) => r.started);
@@ -404,7 +410,7 @@ export function buildHistory({ projectDir, storageDir, cfg, now, since, q }) {
       const who = charInfo(job.who, r);
       return {
         id: r.id, who: who.key, name: who.name, label: who.label, color: who.color, kind: job.who.kind === 'pool' ? 'tim' : 'freelancer',
-        agent_type: r.agentType, task: task(r), status: r.status, started: r.started, ended: job.end === null ? null : job.endIso, tools: r.tools, tokens: r.tokens,
+        agent_type: r.agentType, provider: r.provider, task: task(r), status: r.status, started: r.started, ended: job.end === null ? null : job.endIso, tools: r.tools, tokens: r.tokens,
       };
     });
   return { app: 'kantor-agent', project: cfg.title, runs: out };

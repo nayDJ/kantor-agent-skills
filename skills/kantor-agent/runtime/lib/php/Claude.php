@@ -108,7 +108,7 @@ final class KClaude
         // ponytail: format Claude tidak menyimpan title → mains selalu general-purpose tanpa deskripsi (kontrak modern wajib isi).
         $mains = [];
         foreach ($mainFiles as [$f]) {
-            $mains[] = $this->summarize($f) + ['session' => self::basename($f, '.jsonl'), 'agentType' => 'general-purpose', 'description' => ''];
+            $mains[] = $this->summarize($f) + ['session' => self::basename($f, '.jsonl'), 'provider' => 'claude', 'agentType' => 'general-purpose', 'description' => ''];
         }
 
         $metas = [];
@@ -145,6 +145,7 @@ final class KClaude
             $runs[] = $sum + [
                 'id' => substr($name, 6),
                 'session' => $session,
+                'provider' => 'claude',
                 'agentType' => $type,
                 'description' => $desc,
                 'parentAgent' => isset($meta['parentAgentId']) && is_string($meta['parentAgentId']) ? $meta['parentAgentId'] : null,

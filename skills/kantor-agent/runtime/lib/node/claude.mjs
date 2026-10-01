@@ -79,7 +79,7 @@ export class Claude {
     mainFiles.sort((a, b) => b[1] - a[1] || strcmp(a[0], b[0]));
     mainFiles = mainFiles.slice(0, this.cfg.mains_max);
     // ponytail: format Claude tidak menyimpan title → mains selalu general-purpose tanpa deskripsi (kontrak modern wajib isi).
-    const mains = mainFiles.map(([f]) => ({ ...this.summarize(f), session: basename(f, '.jsonl'), agentType: 'general-purpose', description: '' }));
+    const mains = mainFiles.map(([f]) => ({ ...this.summarize(f), session: basename(f, '.jsonl'), provider: 'claude', agentType: 'general-purpose', description: '' }));
 
     const metas = [];
     for (const d of globDir(root, '')) {
@@ -110,6 +110,7 @@ export class Claude {
         ...sum,
         id: name.slice(6),
         session,
+        provider: 'claude',
         agentType: type,
         description: desc,
         parentAgent: typeof meta.parentAgentId === 'string' ? meta.parentAgentId : null,

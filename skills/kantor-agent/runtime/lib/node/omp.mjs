@@ -155,6 +155,7 @@ export class Omp {
       return {
         ...this.view(s),
         session: s.sid !== null ? s.sid : idFromName(f),
+        provider: 'omp',
         agentType: 'general-purpose',
         description: s.title !== '' ? safeLine(s.title, 140) : '',
       };
@@ -174,6 +175,7 @@ export class Omp {
           ...this.view(s),
           id: s.sid !== null ? s.sid : agent,
           session: parentSid,
+          provider: 'omp',
           agentType: clip(agent, 40) !== '' ? clip(agent, 40) : 'general-purpose',
           description: s.title !== '' ? safeLine(s.title, 140) : '',
           parentAgent: parentSid,
