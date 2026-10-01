@@ -143,6 +143,7 @@ OpenCode:  ~/.local/share/opencode/opencode.db (OPENCODE_DB)                  se
 Kiro CLI:  ~/.kiro/sessions/cli/<id>.json + <id>.jsonl (KIRO_SESSIONS_DIR)     reason "subagent" (atau parent_id agent non-null) → Tim/Freelancer
             Prompt / AssistantMessage(toolUse) → aksi & event
 Claude:    ~/.claude/projects/<path campur>/<sesi>.jsonl (CLAUDE_CONFIG_DIR)    sesi utama → Ketua; subagents/agent-*.jsonl → Tim/Freelancer
+OMP:       ~/.omp/agent/sessions/<bucket-cwd>/*.jsonl (OMP_SESSIONS_DIR)       sesi utama → Ketua; subdir <sesi>/<AgentId>.jsonl → Tim/Freelancer
          │  dibaca read-only; output tool & isi prompt TIDAK pernah dibaca
          ▼
 skills/kantor-agent/runtime/   (dijalankan langsung dari folder skill — tidak disalin ke project)
@@ -161,7 +162,8 @@ Browser: kantor 3D — meja Ketua, 4 meja tim, 4 meja cadangan, lounge, pintu, p
 - `<slug-project>` = path absolut project dengan setiap karakter non-alfanumerik diganti `-`.
 - Database OpenCode mengikuti `OPENCODE_DB` (bila di-set) atau `XDG_DATA_HOME`/`HOME`; sesi Kiro mengikuti
   `KIRO_SESSIONS_DIR` (bila di-set) atau `~/.kiro/sessions/cli`; sesi Claude mengikuti `CLAUDE_CONFIG_DIR`
-  (bila di-set) atau `~/.claude` — server berjalan sebagai user yang sama.
+  (bila di-set) atau `~/.claude`; sesi OMP mengikuti `OMP_SESSIONS_DIR` (bila di-set) atau
+  `~/.omp/agent/sessions` — server berjalan sebagai user yang sama.
 - **Status subagent:** *bekerja* (belum ada jawaban akhir & ada aktivitas ≤ 15 menit), *selesai* (jawaban akhir),
   *terhenti* (tanpa aktivitas > 15 menit), *limit* (pesan batas pemakaian).
 - **Status Ketua:** *bekerja* bila sesi utama aktif ≤ 90 detik, sedang menjalankan alat, atau menunggu subagent-nya;

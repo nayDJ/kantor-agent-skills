@@ -247,6 +247,67 @@ if (up) {
   } catch {
     /* abaikan */
   }
+
+  // omp fixture: 1 sesi utama + 1 subagent subdir via OMP_SESSIONS_DIR sintetis
+  const OFIX = fs.mkdtempSync(path.join(os.tmpdir(), 'kantor-parity-omp-'));
+  const canon = (p) => {
+    try {
+      return fs.realpathSync(String(p));
+    } catch {
+      return path.resolve(String(p));
+    }
+  };
+  const relName = (prefix, rel) => {
+    const enc = rel.replace(/[/\\:]/g, '-');
+    return enc ? (prefix.endsWith('-') ? `${prefix}${enc}` : `${prefix}-${enc}`) : prefix;
+  };
+  const encodeBucket = (cwd) => {
+    const c = canon(cwd);
+    const relH = path.relative(canon(os.homedir()), c);
+    if (relH === '' || (!relH.startsWith('..') && !path.isAbsolute(relH))) return relName('-', relH);
+    const relT = path.relative(canon(os.tmpdir()), c);
+    if (relT === '' || (!relT.startsWith('..') && !path.isAbsolute(relT))) return relName('-tmp', relT);
+    return `--${c.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
+  };
+  const oRoot = path.join(OFIX, encodeBucket(PROJECT));
+  const oBase = '20240101_120000_abc999';
+  const oSub = path.join(oRoot, oBase);
+  fs.mkdirSync(oSub, { recursive: true });
+  const ot0 = new Date(Date.now() - 60000).toISOString();
+  const ot1 = new Date().toISOString();
+  const oMain = [
+    JSON.stringify({ type: 'session', id: 'omp-main-1', cwd: PROJECT, title: 'OMP utama' }),
+    JSON.stringify({ type: 'message', id: 'm1', timestamp: ot0, message: { role: 'user', content: [{ type: 'text', text: 'halo' }] } }),
+    JSON.stringify({ type: 'message', id: 'm2', timestamp: ot1, message: { role: 'assistant', content: [{ type: 'text', text: 'oke' }], stopReason: 'stop', usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 } } }),
+  ].join('\n') + '\n';
+  const oSubLines = [
+    JSON.stringify({ type: 'session', id: 'omp-sub-1', cwd: PROJECT }),
+    JSON.stringify({ type: 'title', title: 'omp-tugas-khusus-xyz' }),
+    JSON.stringify({ type: 'message', id: 's1', timestamp: ot0, message: { role: 'user', content: [{ type: 'text', text: 'kerja' }] } }),
+    JSON.stringify({ type: 'message', id: 's2', timestamp: ot1, message: { role: 'assistant', content: [{ type: 'text', text: 'beres' }], stopReason: 'stop', usage: { input: 3, output: 2, cacheRead: 0, cacheWrite: 0 } } }),
+  ].join('\n') + '\n';
+  fs.writeFileSync(path.join(oRoot, `${oBase}.jsonl`), oMain);
+  fs.writeFileSync(path.join(oSub, 'AgentOmpA.jsonl'), oSubLines);
+  const PP4 = PHP_PORT + 30;
+  const NP4 = NODE_PORT + 30;
+  const phpErr4 = start('php', ['-S', `127.0.0.1:${PP4}`, '-t', 'public', 'public/index.php'], { OMP_SESSIONS_DIR: OFIX });
+  const nodeErr4 = start(process.execPath, ['bin/serve-node.mjs'], { KANTOR_PORT: String(NP4), KANTOR_BIND: '127.0.0.1', OMP_SESSIONS_DIR: OFIX });
+  const P4 = `http://127.0.0.1:${PP4}`;
+  const N4 = `http://127.0.0.1:${NP4}`;
+  const up4 = (await waitUp(P4, 'PHP-omp', phpErr4)) & (await waitUp(N4, 'Node-omp', nodeErr4));
+  if (up4) {
+    const [op, on] = await Promise.all([get(P4, '/kerja/api/state'), get(N4, '/kerja/api/state')]);
+    const [sp4, sn4] = [await op.json(), await on.json()];
+    const d4 = diff(sp4, sn4, '$', new Set(['now']));
+    check(`state fixture OMP identik (${sp4.runs?.length ?? 0} run)`, d4.length === 0, d4.slice(0, 10).join('; '));
+    const hasO = (s) => (s.runs || []).some((r) => r.task === 'omp-tugas-khusus-xyz');
+    check('state memuat runs OMP', hasO(sp4) && hasO(sn4), `PHP ${hasO(sp4)} / Node ${hasO(sn4)}`);
+  }
+  try {
+    fs.rmSync(OFIX, { recursive: true, force: true });
+  } catch {
+    /* abaikan */
+  }
 }
 
 cleanup();
