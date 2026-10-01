@@ -127,6 +127,10 @@ Klik ruangan atau dropdown untuk fokus (+ `?room=` di URL); kartu, feed, riwayat
 Ruangan tersusun otomatis sebagai grid persegi (C=ceil(sqrt(N)) kolom — 4 project = 2×2); satu ruangan tampil identik kantor tunggal.
 Kamera mundur dan dibatasi mengikuti blok grid agar semua ruangan tetap terlihat.
 
+## Ruang santai
+Di tengah ada satu Ruang Santai bersama: PS, kasur, meja billiard, dan sudut ngopi — tanpa data project.
+Siapa pun yang santai (maks 3 per kantor) bisa mampir lewat pintu; otomatis pulang saat ada tugas.
+
 ## Fitur pemantauan
 - **Notifikasi browser (opt-in).** Tombol di bar atas meminta izin; bunyi sekali per transisi saat subagent selesai/limit/terhenti atau Ketua aktif kembali — hanya bila tab tersembunyi.
 - **Salin ringkasan.** Tombol menyalin teks `Sesi YYYY-MM-DD: <Ketua> + N subagent, M tool calls, T token` dari ruangan fokus.

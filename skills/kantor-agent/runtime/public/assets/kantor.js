@@ -367,7 +367,7 @@ function buildRoomShell(roomId, oz = 0) {
   const slab = mesh(new THREE.BoxGeometry(W + 0.6, 0.35, D + 0.6), mat('#d8cdbf', 0.9), { cast: false });
   slab.position.set(cx, -0.18, cz - 0.15);
   scene.add(slab);
-  const wallM = mat(denahFor(PROJECTS.findIndex((p) => p.id === roomId)).wall, 0.95);
+  const wallM = mat(roomId === 'lounge' ? WALL_SINGLE : denahFor(PROJECTS.findIndex((p) => p.id === roomId)).wall, 0.95);
   const back = mesh(new THREE.BoxGeometry(W + 0.6, ROOM.h, 0.3), wallM, { cast: false });
   back.position.set(cx, ROOM.h / 2, ROOM.z0 - 0.15);
   scene.add(back);
@@ -1499,6 +1499,12 @@ const QUIPS = {
   meet2: ['Diskusi ringan dulu ☕', 'Laptopnya siapa ini?', 'Duduk dulu ah'],
   meet3: ['Meja ini paling adem', 'Ngobrol santai dulu', 'Kita bahas nanti aja'],
   bookshelf: ['Buku ini seru juga 📚', 'Wah, ada komik!', 'Bukunya belum dikembalikan nih'],
+  bed: ['Rebahan dulu ah 😴', 'Kasurnya empuk banget', 'Tidur lima menit, janji!'],
+  billiard: ['Sodok cantik! 🎱', 'Bola 8 masuk pojok nih', 'Stiknya lurusin dulu'],
+  kopi1: ['Ngopi santai dulu ☕', 'Meja ini paling adem', 'Sruput… mantap'],
+  kopi2: ['Ngopi santai dulu ☕', 'Sambil ngobrol enak nih', 'Kopinya pas banget'],
+  kopi3: ['Ngopi santai dulu ☕', 'Duduk dulu ah', 'Sore-sore enaknya ngopi'],
+  kopi4: ['Ngopi santai dulu ☕', 'Satu gelas lagi ah', 'Ngobrolin apa nih?'],
 };
 // obrolan receh (sengaja tidak menyebut data nyata apa pun)
 const CHAT = [
@@ -1620,13 +1626,20 @@ function say(a, text, ms = 4200, cls = '') {
 }
 // letakkan langsung (muat pertama / gerak dikurangi); placeId namespaced per room
 function placesOf(a) {
+  const g = String(a?.goal || '');
+  const i = g.indexOf('::');
+  if (i >= 0) {
+    const r = ROOMS.find((x) => x.id === g.slice(0, i));
+    if (r?.places) return r.places;
+  }
   return roomOf(a)?.places || PLACES;
 }
-function placeAt(a, placeId) {
-  const room = roomOf(a);
-  const raw = rawPid(placeId);
-  const pl = (room?.places || PLACES)[raw];
-  if (!pl) return;
+const loungeRoom = () => ROOMS.find((r) => r.id === 'lounge');
+// ponytail: jalur lintas-room via pintu (portal); a.room tetap milik kantor asal,
+// a.inLounge = posisi fisik, a.portal = target mentah (spot santai saat pergi / desk:spot rumah saat pulang)
+function placeIn(a, room, raw) {
+  const pl = room?.places?.[raw];
+  if (!pl) return false;
   if (a.seated) {
     scene.attach(a.p.root);
     a.seated = false;
@@ -1634,26 +1647,24 @@ function placeAt(a, placeId) {
   a.p.root.position.copy(pl.pos);
   a.p.root.rotation.set(0, pl.heading, 0);
   a.heading = pl.heading;
-  a.goal = room ? nsPid(room, raw) : raw;
+  a.goal = `${room.id}::${raw}`;
   a.path = [];
   a.walking = false;
   arrive(a, true);
+  return true;
 }
-function goTo(a, placeId) {
-  const room = roomOf(a);
-  const raw = rawPid(placeId);
-  if (goalRaw(a) === raw) return;
+function goToIn(a, room, raw) {
+  if (!room?.places?.[raw]) return;
+  if (a.goal === `${room.id}::${raw}`) return;
   if (REDUCED || a.goal === null) {
-    placeAt(a, raw);
+    placeIn(a, room, raw);
     return;
   }
-  const PM = room?.places || PLACES;
-  const pl = PM[raw];
-  if (!pl) return;
+  const pl = room.places[raw];
   let esc0;
   if (a.walking) esc0 = a.path[a.i]?.esc ?? [];
   else {
-    const cur = PM[goalRaw(a)];
+    const cur = placesOf(a)[goalRaw(a)];
     esc0 = cur ? [...cur.spoke].reverse() : [];
   }
   if (a.seated) {
@@ -1668,9 +1679,45 @@ function goTo(a, placeId) {
   path.push({ p: pl.pos, esc: [...pl.spoke].reverse() });
   a.path = path;
   a.i = 0;
-  a.goal = room ? nsPid(room, raw) : raw;
+  a.goal = `${room.id}::${raw}`;
   a.walking = true;
   a.holding = null;
+}
+function visitLounge(a, now) {
+  if (!a || a.work || a.walking || a.leaving || a.kind === 'freelancer' || a.inLounge || a.portal) return;
+  if (!goalRaw(a).startsWith('spot:')) return;
+  const home = roomOf(a);
+  if (!home || home.id === 'lounge') return;
+  const lr = loungeRoom();
+  if (!lr) return;
+  let n = 0;
+  for (const r of ROOMS) for (const x of r.actors.values()) {
+    if (roomOf(x) === home && (x.inLounge || (x.portal && !x.inLounge))) n++;
+  }
+  if (n >= 3) return;
+  const taken = new Set();
+  for (const x of home.actors.values()) {
+    if (x !== a && goalRaw(x).startsWith('spot:')) taken.add(goalRaw(x));
+  }
+  for (const r of ROOMS) for (const x of r.actors.values()) {
+    if (x === a) continue;
+    if (x.inLounge || (x.portal && roomOf(x) !== lr)) {
+      const t = x.portal && !x.inLounge ? x.portal : goalRaw(x);
+      if (String(t).startsWith('spot:')) taken.add(t);
+    }
+    if (/^spot:(bed|billiard|kopi[1-4])$/.test(goalRaw(x))) taken.add(goalRaw(x));
+  }
+  const ids = (lr.spotIds || []).filter((id) => !taken.has(`spot:${id}`));
+  if (!ids.length) return;
+  a.portal = `spot:${pickOne(ids)}`;
+  a.spotUntil = now + (REDUCED ? 90000 : 38000 + Math.random() * 34000);
+  goToIn(a, home, 'door');
+}
+function placeAt(a, placeId) {
+  placeIn(a, roomOf(a), rawPid(placeId));
+}
+function goTo(a, placeId) {
+  goToIn(a, roomOf(a), rawPid(placeId));
 }
 function arrive(a, instant = false) {
   a.walking = false;
@@ -1683,10 +1730,46 @@ function arrive(a, instant = false) {
     a.p.root.position.set(0, 0, 0.02);
     a.p.root.rotation.set(0, 0, 0);
     a.seated = true;
+    if (!a.inLounge) delete a.portal;
   } else if (pl.kind === 'door') {
-    a.gone = true;
+    if (a.portal && !a.inLounge) {
+      const lr = loungeRoom();
+      if (lr?.places?.[a.portal]) {
+        a.p.root.position.copy(lr.places.door.pos);
+        a.heading = lr.places.door.heading;
+        a.inLounge = true;
+        a.goal = `${lr.id}::door`;
+        a.path = [];
+        a.walking = false;
+        goToIn(a, lr, a.portal);
+        return;
+      }
+      delete a.portal;
+    } else if (a.portal && a.inLounge) {
+      const home = roomOf(a);
+      if (home?.places?.[a.portal]) {
+        a.p.root.position.copy(home.places.door.pos);
+        a.heading = home.places.door.heading;
+        a.inLounge = false;
+        const target = a.portal;
+        a.goal = `${home.id}::door`;
+        a.path = [];
+        a.walking = false;
+        goToIn(a, home, target);
+        return;
+      }
+      delete a.portal;
+    }
+    if (!a.portal) a.gone = true;
   } else {
-    a.heading = pl.heading;
+    // ponytail: bed menempel matras (pola non-attach spt sofa) — geser root ke tengah kasur, hadap timur agar kepala di bantal barat
+    if (pl.spot === 'bed') {
+      a.p.root.position.set(pl.pos.x, 0, pl.pos.z + 1.4);
+      a.heading = Math.PI / 2;
+      a.p.root.rotation.set(0, a.heading, 0);
+    } else a.heading = pl.heading;
+    if (a.inLounge) delete a.portal;
+    else if (a.portal && /^spot:(bed|billiard|kopi[1-4])$/.test(goalRaw(a))) delete a.portal;
     if (!instant && Math.random() < 0.55 && performance.now() > a.bubble.until) say(a, pickOne(QUIPS[pl.spot] || ['Santai dulu']));
   }
 }
@@ -1711,6 +1794,10 @@ function spotPose(a, spot, t) {
     case 'ps':
       return { ...sofa, spineX: 0.14 + Math.sin(t * 2.3) * 0.03, headX: 0.05, lShX: -0.8, lShZ: 0.3, lElX: -1.25 + Math.sin(t * 9) * 0.05, rShX: -0.8, rShZ: -0.3, rElX: -1.25 - Math.sin(t * 11) * 0.05 };
     case 'coffee':
+    case 'kopi1':
+    case 'kopi2':
+    case 'kopi3':
+    case 'kopi4':
     case 'water': {
       if (st < 2.5) return { ...stand, spineX: 0.1, headX: 0.25, rShX: -1.1, rShZ: -0.1, rElX: -0.5 };
       a.holding = 'mug';
@@ -1732,6 +1819,13 @@ function spotPose(a, spot, t) {
         ? { ...stand, spineX: -0.12, headX: -0.25, lShZ: -2.8, rShZ: 2.8, lElX: -0.2, rElX: -0.2 }
         : { ...stand, headX: -0.05, headY: Math.sin(t * 0.5) * 0.3, lShX: 0.25, lShZ: 0.15, lElX: -0.4, rShX: 0.25, rShZ: -0.15, rElX: -0.4 };
     }
+    case 'bed':
+      // ponytail: rebahan di matras (top 0.595) — root digeser ke tengah kasur saat arrive
+      return { hipsY: 0.62, lHipX: 0, rHipX: 0, lKneeX: 0.06, rKneeX: 0.06, spineX: -1.42, headX: -0.2 + Math.sin(t * 1.1 + a.seed) * 0.05,
+        lShX: 0.1, lShZ: 0.1, lElX: -0.1, rShX: 0.1, rShZ: -0.1, rElX: -0.1 };
+    case 'billiard':
+      return { ...stand, hipsY: 0.78, spineX: 0.55, headX: 0.2, lHipX: 0.25, rHipX: -0.15, lKneeX: 0.1, rKneeX: 0.05,
+        lShX: -1.0 + Math.sin(t * 2) * 0.08, lShZ: 0.1, lElX: -0.3, rShX: -0.5, rShZ: -0.15, rElX: -0.4 };
     default:
       return stand;
   }
@@ -1768,6 +1862,23 @@ function lounge(a, now, instant) {
   const gr = goalRaw(a);
   const onSpot = gr.startsWith('spot:');
   if (onSpot && now < a.spotUntil) return;
+  if (a.inLounge) {
+    if (now < a.spotUntil) return;
+    const lr = loungeRoom();
+    const taken = claimedSpots(a);
+    let options = IDS.filter((id) => !taken.has(id) && `spot:${id}` !== gr);
+    if (!options.length) options = IDS.filter((id) => !taken.has(id));
+    if (!options.length) return;
+    a.portal = `spot:${pickOne(options)}`;
+    const backId = a.portal.slice(5);
+    a.spotUntil = now + (REDUCED ? 90000 : 38000 + Math.random() * 34000);
+    if (instant) {
+      a.inLounge = false;
+      delete a.portal;
+      placeAt(a, `spot:${backId}`);
+    } else goToIn(a, lr, 'door');
+    return;
+  }
   const taken = claimedSpots(a);
   let options = IDS.filter((id) => !taken.has(id) && `spot:${id}` !== gr);
   if (!options.length) options = IDS.filter((id) => !taken.has(id));
@@ -1780,7 +1891,8 @@ function lounge(a, now, instant) {
 function chatter(now) {
   if (now < LOUNGE.chatAt) return;
   LOUNGE.chatAt = now + 7000 + Math.random() * 4500;
-  const avail = [...actors.values()].filter((a) => !a.work && !a.walking && goalRaw(a).startsWith('spot:') && now > a.bubble.until);
+  // ponytail: lintas-room agar pengunjung santai ikut ngobrol
+  const avail = ROOMS.flatMap((r) => [...r.actors.values()]).filter((a) => !a.work && !a.walking && goalRaw(a).startsWith('spot:') && now > a.bubble.until);
   if (avail.length < 2) return;
   const sp = pickOne(avail);
   const near = avail.filter((b) => b !== sp).sort((b1, b2) => b1.p.root.position.distanceTo(sp.p.root.position) - b2.p.root.position.distanceTo(sp.p.root.position));
@@ -1817,7 +1929,7 @@ function buildRoomInstance(roomId, title, ox, oz = 0, row = 0, col = 0) {
   KETUA = makeActor({ key: `${roomId}:ketua`, kind: 'ketua', name: KETUA_NAME, role: 'Ketua', color: COLORS.ketua, look: LOOKS.ketua, desk: 'A0' });
   TEAM = TEAM_NAMES.map((n, i) => makeActor({ key: `${roomId}:tim-${i}`, kind: 'tim', idx: i, name: n, role: 'Tim', color: COLORS.team[i % COLORS.team.length], look: LOOKS.team[i], desk: `A${i + 1}` }));
   const room = {
-    id: roomId, title, ox, oz, row, col,
+    id: roomId, title, ox, oz, row, col, projectId: roomId,
     desks, places: PLACES, actors, ketua: KETUA, team: TEAM, door, loungeAt: LOUNGE, pads: LOUNGE_PADS,
     bounds: ROOM, meet: MEET, spots: SPOTS, spotIds: SPOT_IDS, deskDefs: DESK_DEFS, windows, todoBoard, histBoard,
     state: null, firstLoad: true, prev: new Map(), prevFeed: new Set(), boardSig: '', fresh: new Set(),
@@ -1828,14 +1940,141 @@ function buildRoomInstance(roomId, title, ox, oz = 0, row = 0, col = 0) {
   ROOMS.push(room);
   return room;
 }
-// T6: N ruangan grid (C=ceil(sqrt(N)); ox=col*22, oz=row*15); N=1 identik tampilan lama.
+// S1: ruang santai netral (tanpa meja kerja/aktor) — shell sama, dinding krem netral.
+// ponytail: tanpa desks/actors; spot 'spot' + door pola kantor; no projectId (poll/apply skip).
+function buildLoungeRoom(ox, oz = 0) {
+  const col = Math.round(ox / ROOM_W);
+  const row = Math.round(oz / ROOM_D);
+  ROOM = { x0: -10 + ox, x1: 10 + ox, z0: -7 + oz, z1: 6 + oz, h: 5.2 };
+  DESK_DEFS = [];
+  desks = {};
+  PLACES = {};
+  SPOTS = {};
+  SPOT_IDS = [];
+  LOUNGE = { chatAt: performance.now() + 4000 };
+  LOUNGE_PADS = [];
+  windows = [];
+  todoBoard = null;
+  histBoard = null;
+  buildRoomShell('lounge', oz);
+  door = buildDoor(oz);
+  buildRoomWindows(ox, oz);
+  // (a) sudut PS timur seperti kantor: sofa + tvCorner + 2 gamepad
+  const lounge = new THREE.Group();
+  lounge.position.set(4.9 + ox, 0, 1.45 + oz);
+  lounge.rotation.y = Math.PI;
+  const fabric = mat('#8a8f98', 0.95);
+  const sofaBase = mesh(box(2.6, 0.42, 0.95, 0.12), fabric);
+  sofaBase.position.set(0, 0.3, 0);
+  const sofaBack = mesh(box(2.6, 0.62, 0.25, 0.1), fabric);
+  sofaBack.position.set(0, 0.7, -0.38);
+  lounge.add(sofaBase, sofaBack);
+  for (const s of [-1, 1]) {
+    const armR = mesh(box(0.24, 0.55, 0.95, 0.1), fabric);
+    armR.position.set(s * 1.32, 0.45, 0);
+    lounge.add(armR);
+  }
+  const pad1 = gamepad('#f4f4f6');
+  pad1.position.set(-0.35, 0.55, 0.2);
+  const pad2 = gamepad('#1d1f24');
+  pad2.position.set(0.1, 0.55, 0.2);
+  lounge.add(pad1, pad2);
+  LOUNGE_PADS.push(pad1, pad2);
+  scene.add(lounge, tvCorner(4.9 + ox, 0, -1.3 + oz));
+  // (b) kasur sudut barat: rangka + matras + bantal
+  const bed = new THREE.Group();
+  bed.position.set(ROOM.x0 + 2.2, 0, 3.6 + oz);
+  const frame = mesh(box(2.2, 0.3, 1.7, 0.04), mat('#8c6a4f', 0.6));
+  frame.position.y = 0.2;
+  const mattress = mesh(box(2.1, 0.25, 1.6, 0.08), mat('#f0ece4', 0.9));
+  mattress.position.y = 0.47;
+  const pillow = mesh(box(0.5, 0.15, 0.7, 0.06), mat('#ffffff', 0.9));
+  pillow.position.set(-0.7, 0.65, 0);
+  pillow.rotation.z = 0.1;
+  bed.add(frame, mattress, pillow);
+  scene.add(bed);
+  // (c) meja billiard tengah: meja hijau + 6 lubang + 3 bola + 1 stik miring
+  const bil = new THREE.Group();
+  bil.position.set(ox, 0, 0.3 + oz);
+  const btop = mesh(box(2.4, 0.12, 1.3, 0.02), mat('#2f7d4f', 0.7));
+  btop.position.y = 0.78;
+  const bbody = mesh(box(2.2, 0.6, 1.1, 0.03), mat('#5f4632', 0.6));
+  bbody.position.y = 0.42;
+  bil.add(btop, bbody);
+  const holeM = mat('#141414', 0.9);
+  for (const [hx, hz] of [[-1.15, -0.6], [0, -0.62], [1.15, -0.6], [-1.15, 0.6], [0, 0.62], [1.15, 0.6]]) {
+    const h = mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.03, 14), holeM, { cast: false });
+    h.position.set(hx, 0.85, hz);
+    bil.add(h);
+  }
+  [['#ffffff', -0.4, 0.1], ['#d64545', 0.1, -0.1], ['#2f5bd3', 0.5, 0.2]].forEach(([c, bx, bz]) => {
+    const b = mesh(new THREE.SphereGeometry(0.05, 14, 10), mat(c, 0.4));
+    b.position.set(bx, 0.9, bz);
+    bil.add(b);
+  });
+  const cue = mesh(new THREE.CylinderGeometry(0.012, 0.016, 1.4, 8), mat('#c9a27a', 0.5));
+  cue.position.set(0.3, 0.95, 0.1);
+  cue.rotation.set(Math.PI / 2 - 0.12, 0, 0.5);
+  bil.add(cue);
+  scene.add(bil);
+  // (d) sudut ngopi: 4 officeChair melingkar + meja bundar rendah + 2 mug
+  MEET = { x: -5.0 + ox, z: 3.4 + oz };
+  const rug = mesh(new THREE.CircleGeometry(2.0, 40).rotateX(-Math.PI / 2), mat('#d9cbb5', 1), { cast: false });
+  rug.position.set(MEET.x, 0.01, MEET.z);
+  const tbl = mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.05, 32), mat('#e9e2d6', 0.5));
+  tbl.position.set(MEET.x, 0.42, MEET.z);
+  const tleg = mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.4, 10), mat('#8a8f98', 0.4, 0.6));
+  tleg.position.set(MEET.x, 0.21, MEET.z);
+  scene.add(rug, tbl, tleg);
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + 0.4;
+    const c = officeChair('#b9a58c');
+    c.position.set(MEET.x + Math.sin(a) * 1.25, 0, MEET.z + Math.cos(a) * 1.25);
+    c.rotation.y = a + Math.PI;
+    scene.add(c);
+  }
+  const mug1 = mugMesh('#3f6fd1');
+  mug1.position.set(MEET.x + 0.2, 0.445, MEET.z);
+  const mug2 = mugMesh('#d9772f');
+  mug2.position.set(MEET.x - 0.25, 0.445, MEET.z + 0.15);
+  scene.add(mug1, mug2);
+  plant(ROOM.x0 + 0.6, ROOM.z0 + 0.6, 1.1, 21);
+  plant(ROOM.x1 - 0.7, ROOM.z0 + 0.7, 1.0, 22);
+  buildNameBoard('lounge', 'Ruang Santai', ox, oz);
+  buildRoomClock(ox, oz);
+  const bx = ROOM.x0 + 2.2;
+  SPOTS = {
+    tv: { pos: V(4.3 + ox, 1.25 + oz), heading: Math.PI, spoke: [V(3.2 + ox, CORRIDOR_Z + oz), V(3.2 + ox, 1.05 + oz)], sit: 'sofa' },
+    ps: { pos: V(5.5 + ox, 1.25 + oz), heading: Math.PI, spoke: [V(7.0 + ox, CORRIDOR_Z + oz), V(6.9 + ox, 1.05 + oz)], sit: 'sofa' },
+    bed: { pos: V(bx, 2.2 + oz), heading: 0, spoke: [V(bx, CORRIDOR_Z + oz), V(bx, 1.8 + oz)] },
+    billiard: { pos: V(ox + 1.8, 0.3 + oz), heading: -Math.PI / 2, spoke: [V(ox + 1.8, CORRIDOR_Z + oz), V(ox + 1.8, -0.5 + oz)] },
+    kopi1: { pos: V(MEET.x + 1.25 * Math.sin(0.4), MEET.z + 1.25 * Math.cos(0.4)), heading: -0.4 + Math.PI, spoke: [V(-2.8 + ox, CORRIDOR_Z + oz), V(-2.8 + ox, 1.2 + oz)], sit: 'chair' },
+    kopi2: { pos: V(MEET.x + 1.25 * Math.sin(0.4 + Math.PI / 2), MEET.z + 1.25 * Math.cos(0.4 + Math.PI / 2)), heading: -0.4 - Math.PI / 2 + Math.PI, spoke: [V(-2.8 + ox, CORRIDOR_Z + oz), V(-2.8 + ox, 1.2 + oz)], sit: 'chair' },
+    kopi3: { pos: V(MEET.x + 1.25 * Math.sin(0.4 + Math.PI), MEET.z + 1.25 * Math.cos(0.4 + Math.PI)), heading: -0.4 - Math.PI + Math.PI, spoke: [V(-8.6 + ox, CORRIDOR_Z + oz), V(-8.6 + ox, 1.6 + oz)], sit: 'chair' },
+    kopi4: { pos: V(MEET.x + 1.25 * Math.sin(0.4 + Math.PI * 1.5), MEET.z + 1.25 * Math.cos(0.4 + Math.PI * 1.5)), heading: -0.4 - Math.PI * 1.5 + Math.PI, spoke: [V(-8.6 + ox, CORRIDOR_Z + oz), V(-8.6 + ox, 1.6 + oz)], sit: 'chair' },
+  };
+  for (const [id, s] of Object.entries(SPOTS)) PLACES[`spot:${id}`] = { kind: 'spot', spot: id, ...s };
+  PLACES.door = { kind: 'door', pos: V(ROOM.x0 - 0.9, CORRIDOR_Z + oz), heading: -Math.PI / 2, spoke: [V(ROOM.x0 + 0.6, CORRIDOR_Z + oz)] };
+  SPOT_IDS = Object.keys(SPOTS);
+  const room = {
+    id: 'lounge', title: 'Ruang Santai', ox, oz, row, col,
+    desks: {}, places: PLACES, actors: new Map(), ketua: null, team: [], door, loungeAt: LOUNGE, pads: LOUNGE_PADS,
+    bounds: ROOM, meet: MEET, spots: SPOTS, spotIds: SPOT_IDS, deskDefs: DESK_DEFS, windows, todoBoard: null, histBoard: null,
+    state: null, firstLoad: false, prev: new Map(), prevFeed: new Set(), boardSig: '', fresh: new Set(),
+  };
+  ROOMS.push(room);
+  return room;
+}
+// T6: N ruangan grid (C=ceil(sqrt(N total incl lounge)); ox=col*22, oz=row*15); lounge indeks terakhir = tengah 3x3 utk 4 kantor.
 {
-  const C = Math.ceil(Math.sqrt(PROJECTS.length));
+  const C = Math.ceil(Math.sqrt(PROJECTS.length + 1));
   PROJECTS.forEach((p, i) => {
     const col = i % C;
     const row = Math.floor(i / C);
     buildRoomInstance(p.id, p.title, col * ROOM_W, row * ROOM_D, row, col);
   });
+  const li = PROJECTS.length;
+  buildLoungeRoom((li % C) * ROOM_W, Math.floor(li / C) * ROOM_D);
 }
 FOCUS = ROOMS.find((r) => r.id === FOCUS_Q) || ROOMS.find((r) => r.id === CFG.current) || ROOMS[0];
 useRoom(FOCUS);
@@ -2154,7 +2393,10 @@ async function pollRoom(room) {
   }
 }
 function poll() {
-  for (const room of ROOMS) pollRoom(room);
+  for (const room of ROOMS) {
+    if (!room.projectId) continue;
+    pollRoom(room);
+  }
 }
 let reloading = false;
 function maybeReload(d) {
@@ -2200,6 +2442,7 @@ function checkNotif(d, room) {
 function apply(d, room) {
   room = room || FOCUS || ROOMS[0];
   if (!room) return;
+  if (!room.projectId) return;
   if (maybeReload(d)) return;  useRoom(room);
   room.state = d;
   const firstLoad = room.firstLoad;
@@ -2214,7 +2457,18 @@ function apply(d, room) {
   const kPrev = prev.get(KETUA.key);
   KETUA.work = kWork;
   if (kWork) {
-    if (firstLoad) placeAt(KETUA, 'desk:A0');
+    if (KETUA.inLounge) {
+      KETUA.portal = 'desk:A0';
+      if (firstLoad) {
+        KETUA.inLounge = false;
+        delete KETUA.portal;
+        placeAt(KETUA, 'desk:A0');
+      } else goToIn(KETUA, loungeRoom(), 'door');
+    } else if (KETUA.portal && !KETUA.inLounge) {
+      delete KETUA.portal;
+      if (firstLoad) placeAt(KETUA, 'desk:A0');
+      else goTo(KETUA, 'desk:A0');
+    } else if (firstLoad) placeAt(KETUA, 'desk:A0');
     else goTo(KETUA, 'desk:A0');
   } else if (!goalRaw(KETUA).startsWith('spot:') || firstLoad) lounge(KETUA, now, firstLoad);
   if (live && kPrev && kPrev.state === 'bekerja' && d.ketua.state === 'selesai') say(KETUA, 'Beres, menunggu instruksi berikutnya', 3800, 'hi');
@@ -2229,8 +2483,20 @@ function apply(d, room) {
     const p = prev.get(a.key);
     a.work = working;
     if (working) {
-      if (firstLoad) placeAt(a, `desk:${a.desk}`);
-      else goTo(a, `desk:${a.desk}`);
+      const target = `desk:${a.desk}`;
+      if (a.inLounge) {
+        a.portal = target;
+        if (firstLoad) {
+          a.inLounge = false;
+          delete a.portal;
+          placeAt(a, target);
+        } else goToIn(a, loungeRoom(), 'door');
+      } else if (a.portal && !a.inLounge) {
+        delete a.portal;
+        if (firstLoad) placeAt(a, target);
+        else goTo(a, target);
+      } else if (firstLoad) placeAt(a, target);
+      else goTo(a, target);
       if (live && (!p || p.state !== 'bekerja' || p.runId !== m.run?.id)) {
         say(a, 'Siap, saya kerjakan!', 3600, 'hi');
         if (m.run) say(KETUA, `${a.name}, tolong: ${clip(m.run.task, 40)}`, 4000);
@@ -2756,8 +3022,11 @@ let lastSec = 0;
 let gameAt = 0;
 let tvMode = 'tv';
 function updateActor(a, dt, t, now) {
-  // pilih tempat santai baru bila waktunya
-  if (!a.work && !a.leaving && a.kind !== 'freelancer' && !a.walking) lounge(a, now, false);
+  // pilih tempat santai baru bila waktunya; kunjungan santai: peluang kecil per detik
+  if (!a.work && !a.leaving && a.kind !== 'freelancer' && !a.walking) {
+    lounge(a, now, false);
+    if (!a.walking && Math.random() < dt * 0.03) visitLounge(a, now);
+  }
   const root = a.p.root;
   if (a.walking) {
     const g = a.path[a.i];
@@ -2848,7 +3117,9 @@ function frame() {
     door.open = REDUCED ? (near ? 1 : 0) : THREE.MathUtils.lerp(door.open, near ? 1 : 0, Math.min(1, dt * 5));
     door.hinge.rotation.y = door.open * 1.35; // berayun ke dalam ruangan
     // TV jadi game saat ada yang main PS (tekstur TV global, ikut room pertama yang main)
-    const player = [...actors.values()].find((x) => !x.walking && goalRaw(x) === 'spot:ps');
+    // ponytail: lounge tak punya aktor tetap — pemainnya pengunjung (aktor room lain, inLounge), cari lintas-room
+    const pool = room.id === 'lounge' ? ROOMS.flatMap((r) => [...r.actors.values()]) : [...actors.values()];
+    const player = pool.find((x) => !x.walking && goalRaw(x) === 'spot:ps' && (room.id !== 'lounge' || x.inLounge));
     if (LOUNGE_PADS[1]) LOUNGE_PADS[1].visible = !player;
     if (player && !REDUCED && tvMode !== 'game') {
       if (now - gameAt > 150) {
