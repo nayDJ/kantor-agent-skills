@@ -48,6 +48,7 @@ tanpa data karangan, tanpa login, tanpa konfigurasi.
   utama (juga di papan tulis), kartu Santai / Bekerja / Selesai, statistik *subagent hari ini* & *aktif sekarang*.
 - **Node ≥ 18 atau PHP ≥ 8.1**, tanpa dependensi npm/composer; keluaran JSON identik (dijaga `runtime/bin/parity.mjs` dari folder skill).
 - Ramah ponsel (tanpa scroll horizontal di 390 px), panel bisa diperkecil, menghormati `prefers-reduced-motion`.
+- **Pemantauan seharian:** notifikasi bunyi saat tab tersembunyi, salin ringkasan sesi, pengingat batas token manual Ketua, dan tab Aktivitas 48 jam — lihat [Fitur pemantauan](#fitur-pemantauan).
 
 | Semua santai | Tim penuh + freelancer | Ponsel |
 |---|---|---|
@@ -110,6 +111,14 @@ Tiap project = satu ruangan dengan Ketua + timnya sendiri. Tiap project memakai 
 ## Ruangan
 Satu kantor besar berisi N ruangan — tiap project = satu ruangan dengan Ketua + timnya sendiri.
 Klik ruangan atau dropdown untuk fokus (+ `?room=` di URL); kartu, feed, riwayat, dan tugas mengikuti ruangan fokus.
+Ruangan tersusun otomatis sebagai grid persegi (C=ceil(sqrt(N)) kolom — 4 project = 2×2); satu ruangan tampil identik kantor tunggal.
+Kamera mundur dan dibatasi mengikuti blok grid agar semua ruangan tetap terlihat.
+
+## Fitur pemantauan
+- **Notifikasi browser (opt-in).** Tombol di bar atas meminta izin; bunyi sekali per transisi saat subagent selesai/limit/terhenti atau Ketua aktif kembali — hanya bila tab tersembunyi.
+- **Salin ringkasan.** Tombol menyalin teks `Sesi YYYY-MM-DD: <Ketua> + N subagent, M tool calls, T token` dari ruangan fokus.
+- **Token Ketua + batas manual.** Stat absolut di bar atas; klik untuk ubah batas pengingat sendiri (tersimpan di `localStorage` browser, default 100000) — berubah warna bila terlewati. Ini bukan limit provider.
+- **Tab Aktivitas.** Sparkline SVG 24 batang (satu per 2 jam, 48 jam terakhir dari `recent_starts`) untuk ruangan fokus.
 
 ## Cara kerja
 ```text

@@ -38,6 +38,9 @@ Argumen user: $ARGUMENTS
   `{"title": "…", "port": 8788, "names": {"ketua": "…", "team": ["…","…","…","…"], "freelancers": ["…"]}, "autostart": false}`.
 - Multi-project (`--project` diulang): tiap project = satu ruangan dengan Ketua + tim sendiri;
   klik ruangan/dropdown/`?room=` untuk fokus, panel (kartu, feed, riwayat, tugas) mengikuti ruangan fokus.
+- Notifikasi browser opt-in lewat tombol di bar atas; bunyi sekali per transisi (subagent selesai/limit/terhenti, Ketua aktif kembali) hanya saat tab tersembunyi.
+- Tombol salin ringkasan (`Sesi YYYY-MM-DD: <Ketua> + N subagent, M tool calls, T token`) serta tab Aktivitas (sparkline 24 batang per 2 jam, 48 jam terakhir) mengikuti ruangan fokus.
+- Stat token Ketua absolut di bar atas; batasnya pengingat manual (klik stat untuk ubah, `localStorage`, default 100000) — bukan limit provider.
 
 ## Aturan
 - Read-only terhadap project dan transkrip; jangan membuat atau mengubah file di project kecuali user meminta
