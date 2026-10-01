@@ -308,8 +308,8 @@ function useRoom(room) {
   SPOTS = room.spots;
   SPOT_IDS = room.spotIds;
   actors = room.actors;
-  KETUA = room.ketua;
-  TEAM = room.team;
+  KETUA = room.ketua ?? null; // ponytail: ruang santai ketua=null
+  TEAM = room.team ?? []; // ponytail: ruang santai team=[]
   door = room.door;
   LOUNGE = room.loungeAt;
   LOUNGE_PADS = room.pads;
@@ -1857,6 +1857,7 @@ function claimedSpots(except) {
   return s;
 }
 function lounge(a, now, instant) {
+  if (!a) return; // ponytail: ruang santai tanpa aktor → lewati
   const room = roomOf(a);
   const IDS = room?.spotIds || SPOT_IDS;
   const gr = goalRaw(a);
@@ -2218,13 +2219,14 @@ function drawTodoScreen(scr, todos) {
 }
 function updateDeskScreens(d, now) {
   const a = d.kind === 'ketua' ? KETUA : d.who;
+  if (!a && d.kind !== 'tim') return; // ponytail: ketua null (ruang santai); tim/spare ditangani di bawah
   let sig;
   if (d.kind === 'ketua') {
-    const k = a.data;
+    const k = a?.data;
     sig = JSON.stringify([k?.state, k?.last?.[0]?.t, k?.tools, k?.todos?.at, k?.provider, a.walking, workMode(a)]);
   } else if (a) {
     sig = JSON.stringify([a.key, a.data?.state, a.data?.run?.id, a.data?.run?.last?.[0]?.t, a.data?.run?.tools, a.data?.run?.provider, workMode(a)]);
-  } else sig = `idle:${d.kind === 'tim' ? JSON.stringify([TEAM[d.idx].data?.state, TEAM[d.idx].data?.run?.id]) : ''}`;
+  } else sig = `idle:${d.kind === 'tim' ? JSON.stringify([TEAM[d.idx]?.data?.state, TEAM[d.idx]?.data?.run?.id]) : ''}`;
   if (sig === d.sig && now - d.drawnAt < 20000) return;
   d.sig = sig;
   d.drawnAt = now;
@@ -2247,6 +2249,7 @@ function updateDeskScreens(d, now) {
   }
   if (d.kind === 'tim') {
     const m = TEAM[d.idx];
+    if (!m) return; // ponytail: idx di luar team (ruang santai)
     drawIdleScreen(d.main.scr, `${m.name} · ${STATE_UI[m.data?.state || 'santai'].label}`, m.data?.run ? `terakhir: ${clip(m.data.run.task, 40)}` : 'menunggu tugas', m.color, false);
     drawIdleScreen(d.side.scr, 'Layar terkunci', '', m.color, true);
   } else {
@@ -2452,8 +2455,9 @@ function apply(d, room) {
   const R0 = room;
 
   // Ketua
+  if (!KETUA) return; // ponytail: ruang santai tanpa aktor
   KETUA.data = d.ketua;
-  const kWork = d.ketua.state === 'bekerja' || d.ketua.state === 'selesai';
+  const kWork = d.ketua?.state === 'bekerja' || d.ketua?.state === 'selesai';
   const kPrev = prev.get(KETUA.key);
   KETUA.work = kWork;
   if (kWork) {
@@ -2471,11 +2475,11 @@ function apply(d, room) {
     } else if (firstLoad) placeAt(KETUA, 'desk:A0');
     else goTo(KETUA, 'desk:A0');
   } else if (!goalRaw(KETUA).startsWith('spot:') || firstLoad) lounge(KETUA, now, firstLoad);
-  if (live && kPrev && kPrev.state === 'bekerja' && d.ketua.state === 'selesai') say(KETUA, 'Beres, menunggu instruksi berikutnya', 3800, 'hi');
-  prev.set(KETUA.key, { state: d.ketua.state });
+  if (live && kPrev && kPrev.state === 'bekerja' && d.ketua?.state === 'selesai') say(KETUA, 'Beres, menunggu instruksi berikutnya', 3800, 'hi');
+  prev.set(KETUA.key, { state: d.ketua?.state });
 
   // tim
-  d.team.forEach((m, i) => {
+  (d.team || []).forEach((m, i) => {
     const a = TEAM[i];
     if (!a) return;
     a.data = m;
@@ -2510,7 +2514,7 @@ function apply(d, room) {
 
   // freelancer: datang lewat pintu, duduk di meja cadangan, pulang lewat pintu
   const seen = new Set();
-  for (const f of d.freelancers) {
+  for (const f of d.freelancers || []) {
     if (f.desk === null || f.desk >= SPARE) continue;
     const ak = `${R0.id}:${f.key}`; // key aktor `<roomId>:fl-<runid>`
     seen.add(ak);
@@ -2585,7 +2589,7 @@ function apply(d, room) {
   room.prevFeed = keys;
   room.fresh = fresh;
 
-  const sig = JSON.stringify([d.ketua.todos, (d.runs || []).map((r) => [r.id, r.status, r.label]), localDay(new Date().toISOString())]);
+  const sig = JSON.stringify([d.ketua?.todos, (d.runs || []).map((r) => [r.id, r.status, r.label]), localDay(new Date().toISOString())]);
   if (sig !== room.boardSig) {
     room.boardSig = sig;
     drawTodoBoard(d.ketua);
@@ -2738,13 +2742,13 @@ function renderUi(d, fresh) {
   $('pubStat').hidden = !pub;
   if (pub) $('pubLink').href = pub;
 
-  const workingTeam = d.team.filter((m) => m.state === 'bekerja').map((m) => m.name);
-  const flWork = d.freelancers.filter((f) => f.state === 'bekerja').length;
+  const workingTeam = (d.team || []).filter((m) => m.state === 'bekerja').map((m) => m.name);
+  const flWork = (d.freelancers || []).filter((f) => f.state === 'bekerja').length;
   let phase;
   if (!d.transcripts) phase = 'Belum ada sesi OpenCode untuk folder ini — kantor terisi otomatis setelah OpenCode dipakai di sini.';
-  else if (workingTeam.length || flWork) phase = `Sedang bekerja: ${[...workingTeam, ...(flWork ? [`${flWork} freelancer`] : [])].join(', ')}${d.ketua.state === 'bekerja' ? ` · ${KETUA_NAME} memantau` : ''}`;
-  else if (d.ketua.state === 'bekerja') phase = `${KETUA_NAME} sedang bekerja di sesi utama — tim santai menunggu tugas`;
-  else if (d.ketua.state === 'selesai') phase = `${KETUA_NAME} baru selesai — menunggu instruksi berikutnya`;
+  else if (workingTeam.length || flWork) phase = `Sedang bekerja: ${[...workingTeam, ...(flWork ? [`${flWork} freelancer`] : [])].join(', ')}${d.ketua?.state === 'bekerja' ? ` · ${KETUA_NAME} memantau` : ''}`;
+  else if (d.ketua?.state === 'bekerja') phase = `${KETUA_NAME} sedang bekerja di sesi utama — tim santai menunggu tugas`;
+  else if (d.ketua?.state === 'selesai') phase = `${KETUA_NAME} baru selesai — menunggu instruksi berikutnya`;
   else phase = 'Semua santai ☕ — nonton, ngopi & ngobrol. Otomatis kembali kerja saat ada subagent.';
   $('phase').textContent = phase;
   $('phase').title = phase;
@@ -2770,7 +2774,7 @@ function renderUi(d, fresh) {
   histWire();
   histRender();
   // daftar tugas Ketua
-  const todos = d.ketua.todos;
+  const todos = d.ketua?.todos;
   $('tugasWho').textContent = KETUA_NAME;
   $('nTodo').textContent = fmtNum.format(todos ? todos.items.filter((it) => it.status !== 'completed').length : 0);
   $('paneTodo').innerHTML = `<div class="src">Sumber: <b>${todos && todos.source === 'Task' ? 'TaskCreate/TaskUpdate' : 'TodoWrite'}</b> di sesi utama${todos ? ` · diperbarui ${esc(ago(todos.at))}` : ''}</div>`
@@ -2802,20 +2806,20 @@ function renderUi(d, fresh) {
   }
 
   // kartu
-  const k = d.ketua;
+  const k = d.ketua || {}; // ponytail: data tanpa ketua → kartu netral
   const kLast = k.updated ? `aktif terakhir ${ago(k.updated)}` : 'belum ada sesi utama';
   const kSub = k.other_sessions > 0 ? `+${k.other_sessions} sesi lain aktif`
     : k.activity === 'menunggu-tim' ? `Menunggu ${k.waiting_on} subagent`
       : k.state === 'santai' ? kLast : k.last?.[0]?.text || kLast;
   const cards = [cardHtml({ key: 'ketua', name: KETUA_NAME, role: 'Ketua', color: COLORS.ketua, state: k.state, task: k.state === 'santai' ? 'Santai di lounge' : k.activity === 'alat' ? 'Menjalankan alat' : 'Sesi utama', act: kSub, working: k.state === 'bekerja', provider: k.provider })];
-  for (const m of d.team) {
+  for (const m of d.team || []) {
     const r = m.run;
     const task = m.state === 'santai' ? (r ? `Terakhir: ${r.task}` : 'Santai di lounge') : r?.task || '';
     const act = m.state === 'bekerja' ? r?.last?.[0]?.text || 'Mulai bekerja…' : m.state === 'selesai' ? `Beres ${ago(r?.ended)}` : r ? `selesai ${ago(r.ended)}` : 'menunggu tugas';
     cards.push(cardHtml({ key: m.key, name: m.name, role: 'Tim', color: m.color, state: m.state, task, act, working: m.state === 'bekerja', provider: r?.provider }));
   }
-  const seated = d.freelancers.filter((f) => f.desk !== null && f.desk < SPARE);
-  const extra = d.freelancers.filter((f) => f.desk === null || f.desk >= SPARE);
+  const seated = (d.freelancers || []).filter((f) => f.desk !== null && f.desk < SPARE);
+  const extra = (d.freelancers || []).filter((f) => f.desk === null || f.desk >= SPARE);
   for (const f of seated) {
     const act = f.state === 'bekerja' ? f.run?.last?.[0]?.text || 'Mulai bekerja…' : 'Beres, pamit pulang';
     cards.push(cardHtml({ key: f.key, name: f.name, role: 'Freelancer', color: f.color, state: f.state, task: f.run?.task || '', act, working: f.state === 'bekerja', provider: f.run?.provider }));
@@ -3174,6 +3178,7 @@ if (location.hash === '#debug') {
 // awal: semua santai sampai data pertama datang (tanpa data = tanpa aktivitas palsu)
 for (const room of ROOMS) {
   useRoom(room);
+  if (!room.ketua) continue; // ponytail: ruang santai tanpa aktor → lewati
   for (const a of [KETUA, ...TEAM]) lounge(a, performance.now(), true);
 }
 useRoom(FOCUS);
