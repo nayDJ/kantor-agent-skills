@@ -367,7 +367,7 @@ function buildRoomShell(roomId, oz = 0) {
   const slab = mesh(new THREE.BoxGeometry(W + 0.6, 0.35, D + 0.6), mat('#d8cdbf', 0.9), { cast: false });
   slab.position.set(cx, -0.18, cz - 0.15);
   scene.add(slab);
-  const wallM = mat('#f1ebe2', 0.95);
+  const wallM = mat(denahFor(PROJECTS.findIndex((p) => p.id === roomId)).wall, 0.95);
   const back = mesh(new THREE.BoxGeometry(W + 0.6, ROOM.h, 0.3), wallM, { cast: false });
   back.position.set(cx, ROOM.h / 2, ROOM.z0 - 0.15);
   scene.add(back);
@@ -1274,12 +1274,104 @@ function monitor(w, h) {
 // meja: A0 = Ketua, A1–A4 = tim, B0–B3 = meja cadangan freelancer
 const ROW_A_Z = -4.3;
 const ROW_B_Z = -0.7;
-function buildDesks(ox, oz = 0) {
-  DESK_DEFS = [
-    { id: 'A0', x: -7.0 + ox, z: ROW_A_Z + oz, kind: 'ketua', color: COLORS.ketua },
-    ...TEAM_NAMES.map((n, i) => ({ id: `A${i + 1}`, x: -4.2 + i * 2.8 + ox, z: ROW_A_Z + oz, kind: 'tim', idx: i, color: COLORS.team[i % COLORS.team.length] })),
-    ...Array.from({ length: SPARE }, (_, j) => ({ id: `B${j}`, x: -7.0 + j * 2.8 + ox, z: ROW_B_Z + oz, kind: 'spare', idx: j, color: '#9a938a', gap: [-8.6, -5.6, -2.8, 2.8][j] + ox })),
+const WALLS = ['#b65a38', '#2f6f6a', '#c99a2e', '#7a4a6b'];
+const WALL_SINGLE = '#f1ebe2';
+function denahRows(ox, oz = 0) {
+  return [
+    { id: 'A0', x: -7.0 + ox, z: ROW_A_Z + oz, kind: 'ketua', color: COLORS.ketua, sx: -7.0 + ox, sz: ROW_A_Z + oz + 0.95, face: Math.PI },
+    ...TEAM_NAMES.map((n, i) => {
+      const x = -4.2 + i * 2.8 + ox;
+      const z = ROW_A_Z + oz;
+      return { id: `A${i + 1}`, x, z, kind: 'tim', idx: i, color: COLORS.team[i % COLORS.team.length], sx: x, sz: z + 0.95, face: Math.PI };
+    }),
+    ...Array.from({ length: SPARE }, (_, j) => {
+      const x = -7.0 + j * 2.8 + ox;
+      const z = ROW_B_Z + oz;
+      return { id: `B${j}`, x, z, kind: 'spare', idx: j, color: '#9a938a', gap: [-8.6, -5.6, -2.8, 2.8][j] + ox, sx: x, sz: z + 0.95, face: Math.PI };
+    }),
   ];
+}
+// W2: 5 meja (ketua+tim) melingkar R=3.2 mengelilingi pusat room + 4 cadangan 2 baris pendek sisi koridor.
+// ponytail: lingkaran penuh 9 meja tak muat (koridor z=-2.1, sofa/TV timur, meja rapat barat laut) — busur + baris pendek.
+const CIRCLE_R = 3.2;
+function denahCircle(ox, oz = 0) {
+  const cx = ox, cz = -0.5 + oz;
+  const onCircle = (deg) => {
+    const t = (deg * Math.PI) / 180;
+    const ux = Math.cos(t), uz = Math.sin(t);
+    const x = cx + CIRCLE_R * ux, z = cz + CIRCLE_R * uz;
+    const sx = cx + (CIRCLE_R + 0.95) * ux, sz = cz + (CIRCLE_R + 0.95) * uz;
+    return { x, z, sx, sz, face: Math.atan2(x - sx, z - sz) };
+  };
+  const ANG = [75, 140, 190, 245, 295];
+  return [
+    { id: 'A0', ...onCircle(ANG[0]), kind: 'ketua', color: COLORS.ketua },
+    ...TEAM_NAMES.map((_, i) => ({ id: `A${i + 1}`, ...onCircle(ANG[i + 1]), kind: 'tim', idx: i, color: COLORS.team[i % COLORS.team.length] })),
+    ...[
+      { x: -7.0 + ox, z: ROW_B_Z + oz },
+      { x: 1.4 + ox, z: ROW_B_Z + oz },
+      { x: -7.0 + ox, z: ROW_A_Z + oz },
+      { x: -4.2 + ox, z: ROW_A_Z + oz },
+    ].map((r, j) => ({ id: `B${j}`, x: r.x, z: r.z, kind: 'spare', idx: j, color: '#9a938a', gap: [-8.6, -5.6, -2.8, 2.8][j] + ox, sx: r.x, sz: r.z + 0.95, face: Math.PI })),
+  ];
+}
+function denahFor(i) {
+  const single = PROJECTS.length < 2;
+  // ponytail W3: rotasi denah per ruangan; proyek tunggal tetap rows + krem.
+  if (single) return { denah: 'rows', wall: WALL_SINGLE };
+  const k = (((i % 4) + 4) % 4);
+  return { denah: ['rows', 'circle', 'square', 'U'][k], wall: WALLS[k] };
+}
+// W3: A0=ketua + A1–A4=tim dari 5 titik [x,z,sx,sz]; face=atan2 kursi→meja.
+function denahMain(P) {
+  return P.map(([x, z, sx, sz], k) => ({
+    id: `A${k}`, x, z, sx, sz, face: Math.atan2(x - sx, z - sz),
+    ...(k === 0 ? { kind: 'ketua', color: COLORS.ketua } : { kind: 'tim', idx: k - 1, color: COLORS.team[(k - 1) % COLORS.team.length] }),
+  }));
+}
+// W3: 4 cadangan blok pendek 2x2 sisi barat (pola kind/idx/color/gap = rows, gap = x sendiri).
+function spareShort(ox, oz = 0) {
+  return [
+    { x: -7.0 + ox, z: ROW_B_Z + oz },
+    { x: -4.6 + ox, z: ROW_B_Z + oz },
+    { x: -7.0 + ox, z: ROW_A_Z + oz },
+    { x: -4.6 + ox, z: ROW_A_Z + oz },
+  ].map((r, j) => ({ id: `B${j}`, x: r.x, z: r.z, kind: 'spare', idx: j, color: '#9a938a', gap: r.x, sx: r.x, sz: r.z + 0.95, face: Math.PI }));
+}
+// W3: persegi — 5 meja di 4 sisi (utara ketua, timur+barat 1, selatan 2) menghadap tengah.
+// ponytail: 9 meja penuh tak muat (sofa/TV timur, rapat barat laut) — formasi 5 + cadangan 2x2 barat.
+function denahSquare(ox, oz = 0) {
+  const cz = -2.5 + oz;
+  return [
+    ...denahMain([
+      [ox, ROW_A_Z + oz, ox, ROW_A_Z + oz - 0.95],
+      [ox + 4.2, cz, ox + 5.15, cz],
+      [ox - 2.1, ROW_B_Z + oz, ox - 2.1, ROW_B_Z + oz + 0.95],
+      [ox + 2.1, ROW_B_Z + oz, ox + 2.1, ROW_B_Z + oz + 0.95],
+      [ox - 4.2, cz, ox - 5.15, cz],
+    ]),
+    ...spareShort(ox, oz),
+  ];
+}
+// W3: U terbuka ke barat (pintu/koridor) — basis timur ketua + lengan utara/selatan.
+function denahU(ox, oz = 0) {
+  const cz = -2.5 + oz;
+  return [
+    ...denahMain([
+      [ox + 4.2, cz, ox + 5.15, cz],
+      [ox + 2.1, ROW_A_Z + oz, ox + 2.1, ROW_A_Z + oz - 0.95],
+      [ox - 2.1, ROW_A_Z + oz, ox - 2.1, ROW_A_Z + oz - 0.95],
+      [ox + 2.1, ROW_B_Z + oz, ox + 2.1, ROW_B_Z + oz + 0.95],
+      [ox - 2.1, ROW_B_Z + oz, ox - 2.1, ROW_B_Z + oz + 0.95],
+    ]),
+    ...spareShort(ox, oz),
+  ];
+}
+const DENAH = { rows: denahRows, circle: denahCircle, square: denahSquare, U: denahU };
+function buildDesks(ox, oz = 0, roomId) {
+  // W3: kabel denah per ruangan via denahFor (bukan rows hardcoded) — mengaktifkan circle/square/U.
+  const i = PROJECTS.findIndex((p) => p.id === roomId);
+  DESK_DEFS = (DENAH[denahFor(i < 0 ? 0 : i).denah] || denahRows)(ox, oz);
   desks = {};
   DESK_DEFS.forEach(buildDesk);
 }
@@ -1358,8 +1450,8 @@ function buildDesk(def) {
   lamp.position.set(0, 1.9, 0.3);
   desk.add(lamp);
   const seat = new THREE.Group();
-  seat.position.set(def.x, 0, def.z + 0.95);
-  seat.rotation.y = Math.PI;
+  seat.position.set(def.sx ?? def.x, 0, def.sz ?? def.z + 0.95);
+  seat.rotation.y = def.face ?? Math.PI;
   scene.add(seat);
   seat.add(officeChair(boss ? '#5a3f33' : '#3a3f4a'));
   const d = { ...def, group: desk, seat, main, side, deskMug, lamp, plate: np, data: null, who: null, sig: '', drawnAt: 0, plateSig: '' };
@@ -1374,9 +1466,10 @@ function buildDesk(def) {
 function buildPlaces(ox, oz = 0) {
   PLACES = {};
   for (const d of Object.values(desks)) {
-    const seatPos = V(d.x, d.z + 0.95);
-    const spoke = d.z === ROW_A_Z + oz ? [V(d.x, CORRIDOR_Z + oz)] : [V(d.gap, CORRIDOR_Z + oz), V(d.gap, 0.95 + oz), V(d.x, 0.95 + oz)];
-    PLACES[`desk:${d.id}`] = { kind: 'desk', desk: d, pos: seatPos, heading: Math.PI, spoke };
+    const sx = d.sx ?? d.x;
+    const seatPos = V(sx, d.sz ?? d.z + 0.95);
+    const spoke = d.z === ROW_A_Z + oz ? [V(sx, CORRIDOR_Z + oz)] : [V(d.gap ?? sx, CORRIDOR_Z + oz), V(d.gap ?? sx, 0.95 + oz), V(sx, 0.95 + oz)]; // W2: circle tak punya gap → jatuh ke sx
+    PLACES[`desk:${d.id}`] = { kind: 'desk', desk: d, pos: seatPos, heading: d.face ?? Math.PI, spoke };
   }
   SPOTS = {
     tv: { pos: V(4.3 + ox, 1.25 + oz), heading: Math.PI, spoke: [V(3.2 + ox, CORRIDOR_Z + oz), V(3.2 + ox, 1.05 + oz)], sit: 'sofa' },
@@ -1718,7 +1811,7 @@ function buildRoomInstance(roomId, title, ox, oz = 0, row = 0, col = 0) {
   buildRoomWindows(ox, oz);
   buildFurniture(ox, oz);
   buildBoards(ox, oz, roomId, title);
-  buildDesks(ox, oz);
+  buildDesks(ox, oz, roomId);
   buildPlaces(ox, oz);
   // Ketua + 4 anggota tim selalu ada
   KETUA = makeActor({ key: `${roomId}:ketua`, kind: 'ketua', name: KETUA_NAME, role: 'Ketua', color: COLORS.ketua, look: LOOKS.ketua, desk: 'A0' });
