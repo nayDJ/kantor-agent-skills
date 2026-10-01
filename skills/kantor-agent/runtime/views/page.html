@@ -226,7 +226,18 @@ body.lapang .cards { opacity: .92; }
     <button role="tab" data-tab="feed2" aria-selected="false" class="mfeed" hidden>Aktivitas</button>
   </div><button type="button" class="minbtn" data-min="right" aria-expanded="true" title="Perkecil / buka panel"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sr">Perkecil panel</span></button></div>
   <div class="scroll">
-    <section class="pane on" data-pane="riwayat" id="paneRuns"></section>
+    <section class="pane on" data-pane="riwayat" id="paneRuns">
+      <div class="hrun-f" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+        <input type="date" id="histSince" title="Sejak tanggal" style="border:1px solid var(--line);border-radius:8px;background:#fff;padding:4px 6px;font:inherit;font-size:12px;max-width:132px">
+        <select id="histWho" title="Karakter" style="border:1px solid var(--line);border-radius:8px;background:#fff;padding:4px 6px;font:inherit;font-size:12px;max-width:120px"><option value="">Semua karakter</option></select>
+        <select id="histStatus" title="Status" style="border:1px solid var(--line);border-radius:8px;background:#fff;padding:4px 6px;font:inherit;font-size:12px;max-width:110px"><option value="">Semua status</option><option value="bekerja">Bekerja</option><option value="selesai">Selesai</option><option value="terhenti">Terhenti</option><option value="limit">Limit</option></select>
+        <select id="histKind" title="Jenis" style="border:1px solid var(--line);border-radius:8px;background:#fff;padding:4px 6px;font:inherit;font-size:12px;max-width:120px"><option value="">Semua jenis</option></select>
+        <input id="histQ" type="search" placeholder="Cari tugas…" title="Cari tugas" style="border:1px solid var(--line);border-radius:8px;background:#fff;padding:4px 8px;font:inherit;font-size:12px;min-width:0;flex:1">
+        <button type="button" class="chip" id="histReload" title="Muat ulang riwayat" style="cursor:pointer">Muat ulang</button>
+      </div>
+      <div class="src" id="runsMeta">Sumber: <b>transkrip subagent</b></div>
+      <div id="runsBody"><div class="empty">Memuat…</div></div>
+    </section>
     <section class="pane" data-pane="tugas" id="paneTodo"></section>
     <section class="pane" data-pane="aktivitas" id="paneAct"></section>
     <section class="pane" data-pane="feed2"><ul class="feed" id="feed2"></ul></section>

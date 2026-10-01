@@ -19,6 +19,11 @@ final class KKiro
     private static ?array $lastGood = null;
     // ponytail: dir ditemukan sekali per proses; pindah KIRO_SESSIONS_DIR perlu restart server.
     private static ?string $dirMemo = null;
+    // ponytail: cwd→toplevel/common-dir (null ikut dicache agar git gagal tidak diulang).
+    /** @var array<string,?string> */
+    private static array $topCache = [];
+    /** @var array<string,?string> */
+    private static array $commonCache = [];
 
     /** @param array<string,mixed> $cfg */
     public function __construct(private string $projectDir, ?string $storageDir, private array $cfg)
@@ -56,6 +61,98 @@ final class KKiro
         }
     }
 
+    /** @param list<string> $args */
+    private static function gitOut(string $dir, array $args): ?string
+    {
+        $cmd = array_merge(['git', '-C', $dir], $args);
+        $desc = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $pipes = [];
+        $proc = @proc_open($cmd, $desc, $pipes);
+        if (!is_resource($proc)) {
+            return null;
+        }
+        fclose($pipes[0]);
+        foreach ([1, 2] as $i) {
+            stream_set_blocking($pipes[$i], false);
+        }
+        $out = '';
+        $deadline = microtime(true) + 5.0;
+        $done = false;
+        while (microtime(true) < $deadline) {
+            $st = proc_get_status($proc);
+            if (!$st['running']) {
+                $done = true;
+                break;
+            }
+            $wait = $deadline - microtime(true);
+            if ($wait <= 0) {
+                break;
+            }
+            $r = [$pipes[1], $pipes[2]];
+            $w = null;
+            $e = null;
+            $sec = (int) $wait;
+            $usec = (int) (($wait - $sec) * 1000000);
+            @stream_select($r, $w, $e, $sec, $usec);
+            foreach ($r as $s) {
+                $chunk = @stream_get_contents($s);
+                if ($s === $pipes[1] && is_string($chunk)) {
+                    $out .= $chunk;
+                }
+            }
+        }
+        foreach ([1, 2] as $i) {
+            $rest = @stream_get_contents($pipes[$i]);
+            if ($i === 1 && is_string($rest)) {
+                $out .= $rest;
+            }
+            fclose($pipes[$i]);
+        }
+        if (!$done) {
+            @proc_terminate($proc);
+        }
+        @proc_close($proc);
+        if (!$done) {
+            return null;
+        }
+        $t = trim($out);
+        return $t !== '' ? $t : null;
+    }
+
+    private static function topLevel(mixed $dir): ?string
+    {
+        if (!is_string($dir) || $dir === '') {
+            return null;
+        }
+        if (array_key_exists($dir, self::$topCache)) {
+            return self::$topCache[$dir];
+        }
+        $top = self::gitOut($dir, ['rev-parse', '--show-toplevel']);
+        return self::$topCache[$dir] = $top;
+    }
+
+    private static function commonDir(mixed $dir): ?string
+    {
+        if (!is_string($dir) || $dir === '') {
+            return null;
+        }
+        if (array_key_exists($dir, self::$commonCache)) {
+            return self::$commonCache[$dir];
+        }
+        $c = self::gitOut($dir, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+        return self::$commonCache[$dir] = $c;
+    }
+
+    private static function sameRepo(mixed $a, string $b, ?string $projTop, ?string $projCommon): bool
+    {
+        $t = self::topLevel($a);
+        if ($t !== null && $projTop !== null && $t === $projTop) {
+            return true;
+        }
+        $c = self::commonDir($a);
+        return $c !== null && $projCommon !== null && $c === $projCommon;
+    }
+
     /** @return array{exists:bool,runs:list<array<string,mixed>>,mains:list<array<string,mixed>>} */
     private function scanDir(int $nowSec): array
     {
@@ -69,12 +166,18 @@ final class KKiro
         sort($names, SORT_STRING);
         $mains = [];
         $runs = [];
+        $projTop = self::topLevel($this->projectDir);
+        $projCommon = self::commonDir($this->projectDir);
         foreach ($names as $n) {
             $h = json_decode((string) @file_get_contents(self::dir() . '/' . $n), true);
             if (!is_array($h) || ($h === [] || !array_is_list($h)) === false) {
                 continue;
             }
-            if (($h['cwd'] ?? null) !== $this->projectDir || !is_string($h['session_id'] ?? null)) {
+            if (!is_string($h['session_id'] ?? null)) {
+                continue;
+            }
+            // ponytail: worktree = cwd beda tapi satu repo (toplevel untuk subdir, common-dir untuk worktree).
+            if (($h['cwd'] ?? null) !== $this->projectDir && !self::sameRepo($h['cwd'] ?? null, $this->projectDir, $projTop, $projCommon)) {
                 continue;
             }
             $upd = KUtil::tsMs($h['updated_at'] ?? null);

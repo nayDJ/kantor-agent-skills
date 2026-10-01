@@ -40,7 +40,7 @@ const HUB_ID = crypto.createHash('md5').update(PROJECTS.join('\n')).digest('hex'
 const pidOf = (p) => crypto.createHash('md5').update(p).digest('hex').slice(0, 12);
 const STORAGE = process.env.KANTOR_STORAGE ? path.resolve(process.env.KANTOR_STORAGE) : null;
 const { loadConfig } = await import(new URL('../lib/node/config.mjs', import.meta.url));
-const { buildState } = await import(new URL('../lib/node/office.mjs', import.meta.url));
+const { buildState, buildHistory } = await import(new URL('../lib/node/office.mjs', import.meta.url));
 const { pageConfig, hostAllowed, SECURITY_HEADERS } = await import(new URL('../lib/node/http.mjs', import.meta.url));
 
 if (STORAGE) {
@@ -121,6 +121,10 @@ async function handle(req, res) {
   if (p === '/kerja/api/state') {
     const state = buildState({ projectDir: PDIR, storageDir: STORAGE, cfg, now: Date.now() });
     return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, JSON.stringify(state));
+  }
+  if (p === '/kerja/api/history') {
+    const hist = buildHistory({ projectDir: PDIR, storageDir: STORAGE, cfg, now: Date.now(), since: url.searchParams.get('since'), q: url.searchParams.get('q') });
+    return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, JSON.stringify(hist));
   }
   if (p.startsWith('/kerja/assets/')) {
     const rel = rawurldecode(p.slice('/kerja/assets/'.length));

@@ -249,7 +249,7 @@ export function buildState({ projectDir, storageDir, cfg, now }) {
     const who = charInfo(job.who, r);
     return {
       id: r.id, who: who.key, name: who.name, label: who.label, color: who.color, kind: job.who.kind === 'pool' ? 'tim' : 'freelancer',
-      agent_type: r.agentType, task: task(r), status: r.status, started: r.started, ended: job.end === null ? null : job.endIso, tools: r.tools,
+      agent_type: r.agentType, task: task(r), status: r.status, started: r.started, ended: job.end === null ? null : job.endIso, tools: r.tools, tokens: r.tokens,
     };
   });
   const recent = runs.filter((r) => now - tsMs(r.started) <= 48 * 3600 * 1000).map((r) => r.started);
@@ -279,6 +279,135 @@ export function buildState({ projectDir, storageDir, cfg, now }) {
     spare_desks: cfg.spare_desks,
     public_url: tunnel !== '' ? tunnel : null,
   };
+}
+
+export function buildHistory({ projectDir, storageDir, cfg, now, since, q }) {
+  // ponytail: pipeline sama dengan buildState (scan → effSegs/status → penugasan), diduplikasi
+  // agar buildState tak tersentuh; filter/urut/potong hanya di sini.
+  const nowSec = Math.floor(now / 1000);
+  const scan = new Transcripts(projectDir, storageDir, cfg).scan(nowSec);
+  const RW = cfg.running_window * 1000;
+  const CD = cfg.cooldown * 1000;
+  const stops = new Map();
+  for (const src of [...scan.mains, ...scan.runs]) {
+    for (const [id, t] of src.stops) {
+      if (!stops.has(id)) stops.set(id, []);
+      stops.get(id).push(tsMs(t));
+    }
+  }
+  const runs = [...scan.runs].sort((a, b) => cmp(tsMs(a.started), tsMs(b.started)) || strcmp(a.id, b.id));
+  const byId = new Map();
+  for (const r of runs) {
+    const segs = r.segs.map(([a, b]) => ({ start: tsMs(a), startIso: a, end: b === null ? null : tsMs(b), endIso: b }));
+    let status = r.limit ? 'limit' : 'selesai';
+    let reason = null;
+    const last = segs[segs.length - 1];
+    if (last.end === null) {
+      const st = (stops.get(r.id) ?? []).filter((ms) => ms >= last.start);
+      const upd = tsMs(r.updated);
+      if (st.length) {
+        last.end = Math.min(...st);
+        status = 'terhenti';
+        reason = 'dihentikan';
+      } else if (r.lastKind === 'handback' || r.limit) {
+        last.end = upd;
+        status = r.limit ? 'limit' : 'selesai';
+      } else if (now - upd <= RW) {
+        status = 'bekerja';
+      } else {
+        last.end = upd + RW;
+        status = 'terhenti';
+        reason = 'tidak-aktif';
+      }
+      if (last.end !== null) last.endIso = isoMs(last.end);
+    }
+    r.effSegs = segs;
+    r.status = status;
+    r.reason = reason;
+    byId.set(r.id, r);
+  }
+  const jobs = [];
+  for (const r of runs) r.effSegs.forEach((sg, k) => jobs.push({ run: r, k, ...sg, who: null }));
+  jobs.sort((a, b) => cmp(a.start, b.start) || strcmp(a.run.id, b.run.id) || cmp(a.k, b.k));
+  const pool = cfg.team.map(() => ({ job: null }));
+  const fl = [];
+  const charOf = new Map();
+  const free = (slot, start) => slot.job === null || (slot.job.end !== null && slot.job.end + CD <= start);
+  for (const job of jobs) {
+    const prev = charOf.get(job.run.id) ?? null;
+    let pick = null;
+    if (job.k > 0 && prev !== null) {
+      const slot = prev.kind === 'pool' ? pool[prev.idx] : fl[prev.idx];
+      if ((slot.job !== null && slot.job.run === job.run) || free(slot, job.start)) pick = prev;
+    }
+    if (pick === null) {
+      const i = pool.findIndex((s) => free(s, job.start));
+      if (i >= 0) pick = { kind: 'pool', idx: i, name: cfg.team[i] };
+    }
+    if (pick === null) {
+      let j = fl.findIndex((s) => free(s, job.start));
+      if (j < 0) {
+        j = fl.length;
+        fl.push({ job: null, name: null });
+      }
+      let name;
+      if (prev !== null && prev.kind === 'fl') name = prev.name;
+      else {
+        const used = new Set(fl.filter((s) => !free(s, job.start)).map((s) => s.name));
+        const L = cfg.freelancers.length;
+        const base = hash(job.run.id) % L;
+        name = null;
+        for (let n = 0; n < L; n++) {
+          const cand = cfg.freelancers[(base + n) % L];
+          if (!used.has(cand)) {
+            name = cand;
+            break;
+          }
+        }
+        if (name === null) name = `${cfg.freelancers[base]} ${j + 1}`;
+      }
+      pick = { kind: 'fl', idx: j, name };
+    }
+    if (pick.kind === 'pool') pool[pick.idx].job = job;
+    else {
+      fl[pick.idx].job = job;
+      fl[pick.idx].name = pick.name;
+    }
+    job.who = pick;
+    charOf.set(job.run.id, pick);
+  }
+  const flPal = cfg.colors.freelancers;
+  const charInfo = (who, run) => (who.kind === 'pool'
+    ? { key: `tim-${who.idx}`, name: cfg.team[who.idx], label: cfg.team[who.idx], color: cfg.colors.team[who.idx % cfg.colors.team.length] }
+    : { key: `fl-${run.id}`, name: who.name, label: `Freelancer · ${who.name}`, color: flPal[hash(who.name) % flPal.length] });
+  const task = (r) => (r.description !== '' ? r.description : r.agentType);
+  const jobsOf = new Map();
+  for (const job of jobs) {
+    if (!jobsOf.has(job.run.id)) jobsOf.set(job.run.id, []);
+    jobsOf.get(job.run.id).push(job);
+  }
+  let sinceMs = null;
+  if (typeof since === 'string' && since.trim() !== '') {
+    const s = since.trim();
+    const v = /^\d{4}-\d{2}-\d{2}$/.test(s) ? Date.parse(`${s}T00:00:00Z`) : Date.parse(s);
+    if (!Number.isNaN(v)) sinceMs = v;
+  }
+  const needle = typeof q === 'string' && q.trim() !== '' ? q.trim().toLowerCase() : null;
+  const out = [...runs]
+    .filter((r) => sinceMs === null || (tsMs(r.started) ?? -Infinity) >= sinceMs)
+    .filter((r) => needle === null || task(r).toLowerCase().includes(needle))
+    .sort((a, b) => cmp(tsMs(b.started), tsMs(a.started)) || strcmp(a.id, b.id))
+    .slice(0, 500)
+    .map((r) => {
+      const js = jobsOf.get(r.id);
+      const job = js[js.length - 1];
+      const who = charInfo(job.who, r);
+      return {
+        id: r.id, who: who.key, name: who.name, label: who.label, color: who.color, kind: job.who.kind === 'pool' ? 'tim' : 'freelancer',
+        agent_type: r.agentType, task: task(r), status: r.status, started: r.started, ended: job.end === null ? null : job.endIso, tools: r.tools, tokens: r.tokens,
+      };
+    });
+  return { app: 'kantor-agent', project: cfg.title, runs: out };
 }
 
 function cmp(a, b) {

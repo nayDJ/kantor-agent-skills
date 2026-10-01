@@ -119,6 +119,8 @@ Kamera mundur dan dibatasi mengikuti blok grid agar semua ruangan tetap terlihat
 - **Salin ringkasan.** Tombol menyalin teks `Sesi YYYY-MM-DD: <Ketua> + N subagent, M tool calls, T token` dari ruangan fokus.
 - **Token Ketua + batas manual.** Stat absolut di bar atas; klik untuk ubah batas pengingat sendiri (tersimpan di `localStorage` browser, default 100000) — berubah warna bila terlewati. Ini bukan limit provider.
 - **Tab Aktivitas.** Sparkline SVG 24 batang (satu per 2 jam, 48 jam terakhir dari `recent_starts`) untuk ruangan fokus.
+- **Tab Riwayat lengkap.** Tabel maks 500 entri (waktu, siapa, tugas, status, alat, token) dengan filter tanggal, karakter, status, jenis agent, dan pencarian tugas — via `GET /kerja/api/history?project=&since=&q=`.
+- **Dukungan worktree.** Sesi OpenCode dikenali per `project_id` (bukan path persis), jadi worktree satu repo ikut terpantau; sesi Kiro disamakan via git repo yang sama.
 
 ## Cara kerja
 ```text

@@ -5,6 +5,7 @@
 // Subagent = session_created_reason "subagent" (atau agent parent). Waktu baris hanya ada di Prompt
 // (meta.timestamp, detik) — baris lain memakai waktu Prompt terakhir.
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,6 +28,45 @@ export function kiroDir() {
   const env = process.env.KIRO_SESSIONS_DIR || '';
   if (env !== '') return (dirMemo = env);
   return (dirMemo = `${(process.env.HOME || os.homedir() || '').replace(/\/+$/, '')}/.kiro/sessions/cli`);
+}
+
+// ponytail: cwd→toplevel (null ikut dicache agar git gagal tidak diulang).
+// show-toplevel sama untuk subdir, tapi BEDA per worktree → common-dir (absolut)
+// menutupi linked worktree: satu .git utama untuk main + semua worktree-nya.
+const topCache = new Map();
+function gitOut(dir, args) {
+  return String(execFileSync('git', ['-C', dir, ...args], { timeout: 5000, stdio: 'pipe', encoding: 'utf8' })).trim() || null;
+}
+function topLevel(dir) {
+  if (typeof dir !== 'string' || dir === '') return null;
+  if (topCache.has(dir)) return topCache.get(dir);
+  let top = null;
+  try {
+    top = gitOut(dir, ['rev-parse', '--show-toplevel']);
+  } catch {
+    top = null;
+  }
+  topCache.set(dir, top);
+  return top;
+}
+const commonCache = new Map();
+function commonDir(dir) {
+  if (typeof dir !== 'string' || dir === '') return null;
+  if (commonCache.has(dir)) return commonCache.get(dir);
+  let c = null;
+  try {
+    c = gitOut(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  } catch {
+    c = null;
+  }
+  commonCache.set(dir, c);
+  return c;
+}
+function sameRepo(a, b, projTop, projCommon) {
+  const t = topLevel(a);
+  if (t !== null && projTop !== null && t === projTop) return true;
+  const c = commonDir(a);
+  return c !== null && projCommon !== null && c === projCommon;
 }
 
 let lastGood = null; // ponytail: file terkunci/rusak → hasil bagus terakhir, bukan kantor kosong.
@@ -57,6 +97,8 @@ export class Kiro {
     }
     const mains = [];
     const runs = [];
+    const projTop = topLevel(this.projectDir);
+    const projCommon = commonDir(this.projectDir);
     for (const n of names) {
       let h;
       try {
@@ -64,7 +106,9 @@ export class Kiro {
       } catch {
         continue;
       }
-      if (!isPlainObj(h) || h.cwd !== this.projectDir || typeof h.session_id !== 'string') continue;
+      if (!isPlainObj(h) || typeof h.session_id !== 'string') continue;
+      // ponytail: worktree = cwd beda tapi satu repo (toplevel untuk subdir, common-dir untuk worktree).
+      if (h.cwd !== this.projectDir && !sameRepo(h.cwd, this.projectDir, projTop, projCommon)) continue;
       const upd = tsMs(h.updated_at);
       if (upd === null || upd < cutoff) continue;
       if (mains.length + runs.length >= this.cfg.mains_max * 2) break;

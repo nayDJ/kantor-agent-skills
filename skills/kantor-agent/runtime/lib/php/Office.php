@@ -323,6 +323,7 @@ final class KOffice
                 'id' => $r['id'], 'who' => $who['key'], 'name' => $who['name'], 'label' => $who['label'], 'color' => $who['color'],
                 'kind' => $job['who']['kind'] === 'pool' ? 'tim' : 'freelancer', 'agent_type' => $r['agentType'], 'task' => $task($r),
                 'status' => $r['status'], 'started' => $r['started'], 'ended' => $job['end'] === null ? null : $job['endIso'], 'tools' => $r['tools'],
+                'tokens' => $r['tokens'],
             ];
         }
         $recent = [];
@@ -358,5 +359,195 @@ final class KOffice
             'spare_desks' => (int) $cfg['spare_desks'],
             'public_url' => $tunnel !== '' ? $tunnel : null,
         ];
+    }
+
+    /** @param array<string,mixed> $cfg @return array<string,mixed> */
+    public static function history(string $projectDir, ?string $storageDir, array $cfg, int $now, mixed $since, mixed $q): array
+    {
+        // ponytail: pipeline sama dengan build() (scan → effSegs/status → penugasan), diduplikasi
+        // agar build() tak tersentuh; filter/urut/potong hanya di sini.
+        $nowSec = intdiv($now, 1000);
+        $scan = (new KTranscripts($projectDir, $storageDir, $cfg))->scan($nowSec);
+        $RW = (int) $cfg['running_window'] * 1000;
+        $CD = (int) $cfg['cooldown'] * 1000;
+
+        $stops = [];
+        foreach ([...$scan['mains'], ...$scan['runs']] as $src) {
+            foreach ($src['stops'] as [$id, $t]) {
+                $stops[$id][] = KUtil::tsMs($t);
+            }
+        }
+
+        $runs = $scan['runs'];
+        usort($runs, static fn($a, $b) => (KUtil::tsMs($a['started']) <=> KUtil::tsMs($b['started'])) ?: strcmp($a['id'], $b['id']));
+        foreach ($runs as &$r) {
+            $segs = [];
+            foreach ($r['segs'] as [$a, $b]) {
+                $segs[] = ['start' => KUtil::tsMs($a), 'startIso' => $a, 'end' => $b === null ? null : KUtil::tsMs($b), 'endIso' => $b];
+            }
+            $status = $r['limit'] ? 'limit' : 'selesai';
+            $reason = null;
+            $li = count($segs) - 1;
+            if ($segs[$li]['end'] === null) {
+                $st = array_values(array_filter($stops[$r['id']] ?? [], static fn($ms) => $ms >= $segs[$li]['start']));
+                $upd = KUtil::tsMs($r['updated']);
+                if ($st) {
+                    $segs[$li]['end'] = min($st);
+                    $status = 'terhenti';
+                    $reason = 'dihentikan';
+                } elseif ($r['lastKind'] === 'handback' || $r['limit']) {
+                    $segs[$li]['end'] = $upd;
+                    $status = $r['limit'] ? 'limit' : 'selesai';
+                } elseif ($now - $upd <= $RW) {
+                    $status = 'bekerja';
+                } else {
+                    $segs[$li]['end'] = $upd + $RW;
+                    $status = 'terhenti';
+                    $reason = 'tidak-aktif';
+                }
+                if ($segs[$li]['end'] !== null) {
+                    $segs[$li]['endIso'] = KUtil::isoMs($segs[$li]['end']);
+                }
+            }
+            $r['effSegs'] = $segs;
+            $r['status'] = $status;
+            $r['reason'] = $reason;
+        }
+        unset($r);
+
+        $jobs = [];
+        foreach ($runs as $ri => $r) {
+            foreach ($r['effSegs'] as $k => $sg) {
+                $jobs[] = $sg + ['ri' => $ri, 'rid' => $r['id'], 'k' => $k, 'who' => null];
+            }
+        }
+        usort($jobs, static fn($a, $b) => ($a['start'] <=> $b['start']) ?: (strcmp($a['rid'], $b['rid']) ?: ($a['k'] <=> $b['k'])));
+        $team = $cfg['team'];
+        $pool = array_fill(0, count($team), null);
+        $fl = [];
+        $charOf = [];
+        $free = static function (?int $ji, int $start) use (&$jobs, $CD): bool {
+            return $ji === null || ($jobs[$ji]['end'] !== null && $jobs[$ji]['end'] + $CD <= $start);
+        };
+        foreach ($jobs as $jx => $job) {
+            $prev = $charOf[$job['rid']] ?? null;
+            $pick = null;
+            if ($job['k'] > 0 && $prev !== null) {
+                $sj = $prev['kind'] === 'pool' ? $pool[$prev['idx']] : $fl[$prev['idx']]['job'];
+                if (($sj !== null && $jobs[$sj]['rid'] === $job['rid']) || $free($sj, $job['start'])) {
+                    $pick = $prev;
+                }
+            }
+            if ($pick === null) {
+                foreach ($pool as $i => $sj) {
+                    if ($free($sj, $job['start'])) {
+                        $pick = ['kind' => 'pool', 'idx' => $i, 'name' => $team[$i]];
+                        break;
+                    }
+                }
+            }
+            if ($pick === null) {
+                $j = -1;
+                foreach ($fl as $i => $slot) {
+                    if ($free($slot['job'], $job['start'])) {
+                        $j = $i;
+                        break;
+                    }
+                }
+                if ($j < 0) {
+                    $j = count($fl);
+                    $fl[] = ['job' => null, 'name' => null];
+                }
+                if ($prev !== null && $prev['kind'] === 'fl') {
+                    $name = $prev['name'];
+                } else {
+                    $used = [];
+                    foreach ($fl as $slot) {
+                        if (!$free($slot['job'], $job['start'])) {
+                            $used[$slot['name']] = true;
+                        }
+                    }
+                    $L = count($cfg['freelancers']);
+                    $base = KUtil::hash($job['rid']) % $L;
+                    $name = null;
+                    for ($n = 0; $n < $L; $n++) {
+                        $cand = $cfg['freelancers'][($base + $n) % $L];
+                        if (!isset($used[$cand])) {
+                            $name = $cand;
+                            break;
+                        }
+                    }
+                    $name ??= $cfg['freelancers'][$base] . ' ' . ($j + 1);
+                }
+                $pick = ['kind' => 'fl', 'idx' => $j, 'name' => $name];
+            }
+            if ($pick['kind'] === 'pool') {
+                $pool[$pick['idx']] = $jx;
+            } else {
+                $fl[$pick['idx']] = ['job' => $jx, 'name' => $pick['name']];
+            }
+            $jobs[$jx]['who'] = $pick;
+            $charOf[$job['rid']] = $pick;
+        }
+
+        $flPal = $cfg['colors']['freelancers'];
+        $teamCol = $cfg['colors']['team'];
+        $charInfo = static function (array $who, ?array $run) use ($team, $flPal, $teamCol): array {
+            if ($who['kind'] === 'pool') {
+                return ['key' => 'tim-' . $who['idx'], 'name' => $team[$who['idx']], 'label' => $team[$who['idx']], 'color' => $teamCol[$who['idx'] % count($teamCol)]];
+            }
+            return ['key' => 'fl-' . $run['id'], 'name' => $who['name'], 'label' => 'Freelancer · ' . $who['name'],
+                'color' => $flPal[KUtil::hash($who['name']) % count($flPal)]];
+        };
+        $task = static fn(array $r): string => $r['description'] !== '' ? $r['description'] : $r['agentType'];
+        $jobsOf = [];
+        foreach ($jobs as $jx => $job) {
+            $jobsOf[$job['rid']][] = $jx;
+        }
+
+        $sinceMs = null;
+        if (is_string($since) && trim($since) !== '') {
+            $s = trim($since);
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $s)) {
+                $v = KUtil::tsMs($s . 'T00:00:00.000Z');
+            } else {
+                $v = KUtil::tsMs($s);
+                if ($v === null) {
+                    $t = @strtotime($s);
+                    $v = $t === false ? null : $t * 1000;
+                }
+            }
+            if ($v !== null) {
+                $sinceMs = $v;
+            }
+        }
+        $needle = is_string($q) && trim($q) !== '' ? mb_strtolower(trim($q)) : null;
+
+        $filtered = array_values(array_filter($runs, static function ($r) use ($sinceMs, $needle, $task): bool {
+            if ($sinceMs !== null) {
+                $st = KUtil::tsMs($r['started']);
+                if (($st ?? -INF) < $sinceMs) {
+                    return false;
+                }
+            }
+            if ($needle !== null && !str_contains(mb_strtolower($task($r)), $needle)) {
+                return false;
+            }
+            return true;
+        }));
+        usort($filtered, static fn($a, $b) => (KUtil::tsMs($b['started']) <=> KUtil::tsMs($a['started'])) ?: strcmp($a['id'], $b['id']));
+        $out = [];
+        foreach (array_slice($filtered, 0, 500) as $r) {
+            $js = $jobsOf[$r['id']];
+            $job = $jobs[$js[count($js) - 1]];
+            $who = $charInfo($job['who'], $r);
+            $out[] = [
+                'id' => $r['id'], 'who' => $who['key'], 'name' => $who['name'], 'label' => $who['label'], 'color' => $who['color'],
+                'kind' => $job['who']['kind'] === 'pool' ? 'tim' : 'freelancer', 'agent_type' => $r['agentType'], 'task' => $task($r),
+                'status' => $r['status'], 'started' => $r['started'], 'ended' => $job['end'] === null ? null : $job['endIso'], 'tools' => $r['tools'],
+                'tokens' => $r['tokens'],
+            ];
+        }
+        return ['app' => 'kantor-agent', 'project' => $cfg['title'], 'runs' => $out];
     }
 }

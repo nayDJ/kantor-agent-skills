@@ -122,6 +122,11 @@ if ($path === '/kerja/api/state') {
     $send(200, ['Content-Type' => 'application/json; charset=utf-8', 'Cache-Control' => 'no-store'],
         (string) json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
 }
+if ($path === '/kerja/api/history') {
+    $hist = KOffice::history($project, $storage, $cfg, (int) floor(microtime(true) * 1000), $q['since'] ?? null, $q['q'] ?? null);
+    $send(200, ['Content-Type' => 'application/json; charset=utf-8', 'Cache-Control' => 'no-store'],
+        (string) json_encode($hist, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
+}
 if (str_starts_with($path, '/kerja/assets/')) {
     $rel = rawurldecode(substr($path, strlen('/kerja/assets/')));
     $base = realpath(__DIR__ . '/assets');

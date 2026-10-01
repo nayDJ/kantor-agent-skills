@@ -59,6 +59,7 @@ function setFocus(id, push = true) {
     history.replaceState(null, '', `${location.pathname}?${q.toString()}${location.hash}`);
   }
   if (r.state) renderUi(r.state, r.fresh || new Set());
+  try { histOnRoom(r); } catch { /* panel riwayat belum siap */ }
 }
 (function initHub() {
   const sel = document.getElementById('projSel');
@@ -2238,6 +2239,118 @@ function stateChip(state, extra = '') {
   const ui = STATE_UI[state] || STATE_UI.santai;
   return `<span class="chip st" style="color:${ui.css}"><i></i>${esc(ui.label)}${extra}</span>`;
 }
+// ponytail: riwayat penuh via /api/history; tanpa poll sendiri, fetch hanya saat tab dibuka/filter/reload/fokus
+const HIST = { roomId: null, base: [], rows: null, err: '', timer: 0, wired: false, loading: false };
+function histVisible() {
+  const p = $('paneRuns');
+  return !!(p && p.classList.contains('on'));
+}
+function histVals() {
+  return {
+    since: $('histSince')?.value || '',
+    who: $('histWho')?.value || '',
+    status: $('histStatus')?.value || '',
+    kind: $('histKind')?.value || '',
+    q: ($('histQ')?.value || '').trim(),
+  };
+}
+function histFillOpts(list) {
+  const w = $('histWho');
+  const k = $('histKind');
+  if (w) {
+    const cur = w.value;
+    const names = [...new Set((list || []).map((r) => r.name || r.who).filter(Boolean))].sort();
+    w.innerHTML = '<option value="">Semua karakter</option>' + names.map((n) => `<option value="${esc(n)}">${esc(clip(n, 18))}</option>`).join('');
+    if (names.includes(cur)) w.value = cur;
+  }
+  if (k) {
+    const cur = k.value;
+    const kinds = [...new Set((list || []).map((r) => r.agent_type).filter(Boolean))].sort();
+    k.innerHTML = '<option value="">Semua jenis</option>' + kinds.map((n) => `<option value="${esc(n)}">${esc(clip(n, 18))}</option>`).join('');
+    if (kinds.includes(cur)) k.value = cur;
+  }
+}
+function histFiltered() {
+  const v = histVals();
+  const src = HIST.rows || HIST.base || [];
+  const ql = v.q.toLowerCase();
+  return src.filter((r) => {
+    if (v.who && (r.name || r.who) !== v.who) return false;
+    if (v.status && r.status !== v.status) return false;
+    if (v.kind && r.agent_type !== v.kind) return false;
+    if (v.since && String(r.started || '').slice(0, 10) < v.since) return false;
+    if (ql && !`${r.task || ''} ${r.label || ''}`.toLowerCase().includes(ql)) return false;
+    return true;
+  });
+}
+function histRender() {
+  const body = $('runsBody');
+  const meta = $('runsMeta');
+  if (!body) return;
+  const src = HIST.rows || HIST.base || [];
+  histFillOpts(src);
+  const list = histFiltered();
+  if (meta) meta.innerHTML = `Sumber: <b>transkrip subagent</b> · ${esc(fmtNum.format(list.length))} dari ${esc(fmtNum.format(src.length))}`;
+  if (HIST.loading) { body.innerHTML = '<div class="empty">Memuat…</div>'; return; }
+  if (HIST.err) { body.innerHTML = `<div class="empty">${esc(HIST.err)}</div>`; return; }
+  if (!list.length) { body.innerHTML = '<div class="empty">Tidak ada riwayat yang cocok.</div>'; return; }
+  body.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--muted);text-align:left;font-size:11px"><th style="padding:4px 6px;font-weight:600">Waktu</th><th style="padding:4px 6px;font-weight:600">Siapa</th><th style="padding:4px 6px;font-weight:600">Tugas</th><th style="padding:4px 6px;font-weight:600">Status</th><th style="padding:4px 6px;font-weight:600;text-align:right">Alat</th><th style="padding:4px 6px;font-weight:600;text-align:right">Token</th></tr></thead><tbody>`
+    + list.slice(0, 200).map((r) => {
+      const ui = RUN_UI[r.status] || RUN_UI.selesai;
+      const nm = r.name || r.who || '?';
+      return `<tr style="border-top:1px solid var(--line)"><td style="padding:5px 6px;white-space:nowrap;font-family:var(--mono);font-size:11px" title="${esc(r.started || '')}">${esc(hhmm(r.started))}</td><td style="padding:5px 6px;white-space:nowrap;max-width:88px;overflow:hidden;text-overflow:ellipsis"><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${esc(r.color || '#888')};margin-right:5px"></i>${esc(clip(nm, 14))}</td><td style="padding:5px 6px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.task || '')}">${esc(clip(r.task || '—', 52))}</td><td style="padding:5px 6px"><span class="chip" style="color:${ui.css}"><i></i>${esc(ui.label)}</span></td><td style="padding:5px 6px;text-align:right;font-family:var(--mono)">${esc(fmtNum.format(r.tools || 0))}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono)">${esc(fmtCompact.format(r.tokens || 0))}</td></tr>`;
+    }).join('') + `</tbody></table>`;
+}
+async function histFetch() {
+  const room = FOCUS;
+  if (!room || !histVisible()) return;
+  const v = histVals();
+  HIST.loading = true;
+  HIST.err = '';
+  histRender();
+  try {
+    const q = new URLSearchParams({ project: room.id });
+    if (v.since) q.set('since', v.since);
+    if (v.q) q.set('q', v.q);
+    const r = await fetch(`/kerja/api/history?${q.toString()}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if (room !== FOCUS) return;
+    HIST.roomId = room.id;
+    HIST.rows = Array.isArray(d.runs) ? d.runs : [];
+  } catch {
+    HIST.err = 'Gagal memuat riwayat.';
+  } finally {
+    HIST.loading = false;
+    histRender();
+  }
+}
+function histSched() {
+  clearTimeout(HIST.timer);
+  HIST.timer = setTimeout(histFetch, 400);
+}
+function histWire() {
+  if (HIST.wired) return;
+  HIST.wired = true;
+  for (const [id, ev] of [['histSince', 'change'], ['histWho', 'change'], ['histStatus', 'change'], ['histKind', 'change']]) {
+    $(id)?.addEventListener(ev, histSched);
+  }
+  $('histQ')?.addEventListener('input', histSched);
+  $('histReload')?.addEventListener('click', histFetch);
+}
+function histOnRoom(room) {
+  histWire();
+  if (HIST.roomId !== room.id) {
+    HIST.roomId = room.id;
+    HIST.rows = null;
+    HIST.err = '';
+    if ($('histWho')) $('histWho').value = '';
+    if ($('histKind')) $('histKind').value = '';
+  }
+  HIST.base = room.state?.runs || [];
+  histRender();
+  if (histVisible()) histFetch();
+}
 function renderUi(d, fresh) {
   const today = localDay(new Date().toISOString());
   const nToday = (d.stats.recent_starts || []).filter((s) => localDay(s) === today).length;
@@ -2282,14 +2395,12 @@ function renderUi(d, fresh) {
   for (const id of ['feed', 'feed2']) if ($(id).innerHTML !== feedHtml) $(id).innerHTML = feedHtml;
   $('feedCount').textContent = fmtNum.format(d.feed.length);
 
-  // riwayat
-  const runs = d.runs || [];
-  $('nRuns').textContent = fmtNum.format(runs.length);
-  $('paneRuns').innerHTML = '<div class="src">Sumber: <b>transkrip subagent</b> 7 hari terakhir (terbaru di atas)</div>'
-    + (runs.length ? runs.map((r) => {
-      const ui = RUN_UI[r.status] || RUN_UI.selesai;
-      return `<div class="run"><span class="c" style="background:${esc(r.color)}"></span><span class="t" title="${esc(r.task)}">${esc(r.task)}</span><span class="chip" style="color:${ui.css}"><i></i>${esc(ui.label)}</span><span class="w">${esc(r.label)} · ${esc(r.agent_type)} · ${esc(hhmm(r.started))} · ${esc(dur(r.started, r.ended))}</span></div>`;
-    }).join('') : '<div class="empty">Belum ada subagent. Karakter tetap santai sampai OpenCode memanggil subagent.</div>');
+  // riwayat (tabel + filter; poll 3 dtk hanya render ulang, fetch di histFetch)
+  HIST.base = d.runs || [];
+  if (!HIST.roomId && FOCUS) HIST.roomId = FOCUS.id;
+  $('nRuns').textContent = fmtNum.format((HIST.rows || HIST.base).length);
+  histWire();
+  histRender();
   // daftar tugas Ketua
   const todos = d.ketua.todos;
   $('tugasWho').textContent = KETUA_NAME;
@@ -2384,6 +2495,7 @@ document.addEventListener('click', (e) => {
     if (document.querySelector('.side.right').classList.contains('min')) setMin('right', false);
     document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b === tab)));
     document.querySelectorAll('[data-pane]').forEach((p) => p.classList.toggle('on', p.dataset.pane === tab.dataset.tab));
+    if (tab.dataset.tab === 'riwayat') histFetch();
     return;
   }
   const f = e.target.closest('[data-focus]');

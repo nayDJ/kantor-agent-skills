@@ -84,10 +84,34 @@ final class KTranscripts
         $db->exec('PRAGMA busy_timeout=5000; PRAGMA query_only=ON');
         try {
             $cutoff = ($nowSec - (int) $this->cfg['window_days'] * 86400) * 1000;
-            $rows = self::query($db,
-                'SELECT id,parent_id,directory,title,agent,time_created,time_updated FROM session
-                 WHERE directory=? AND time_updated>=? AND time_archived IS NULL ORDER BY time_updated DESC',
-                [$this->projectDir, $cutoff]);
+            $sel = 'SELECT id,parent_id,directory,title,agent,time_created,time_updated FROM session';
+            $rows = null;
+            try {
+                $rows = self::query($db,
+                    $sel . '
+                     WHERE project_id IN (SELECT project_id FROM project_directory WHERE directory=?) AND time_updated>=? AND time_archived IS NULL ORDER BY time_updated DESC',
+                    [$this->projectDir, $cutoff]);
+            } catch (Throwable) { $rows = null; } // ponytail: DB lama tanpa tabel project_directory → fallback exact-match.
+            if ($rows === null) {
+                $rows = self::query($db,
+                    $sel . '
+                     WHERE directory=? AND time_updated>=? AND time_archived IS NULL ORDER BY time_updated DESC',
+                    [$this->projectDir, $cutoff]);
+            } elseif (count($rows) === 0) {
+                // ponytail: COUNT ringan saja bila kosong; project lama tanpa baris project_directory → fallback.
+                $n = 0;
+                try {
+                    $c = self::query($db, 'SELECT COUNT(*) AS n FROM session WHERE directory=? AND time_updated>=? AND time_archived IS NULL',
+                        [$this->projectDir, $cutoff]);
+                    $n = (int) ($c[0]['n'] ?? 0);
+                } catch (Throwable) { $n = 0; }
+                if ($n > 0) {
+                    $rows = self::query($db,
+                        $sel . '
+                         WHERE directory=? AND time_updated>=? AND time_archived IS NULL ORDER BY time_updated DESC',
+                        [$this->projectDir, $cutoff]);
+                }
+            }
             $mains = [];
             $kids = [];
             foreach ($rows as $r) {

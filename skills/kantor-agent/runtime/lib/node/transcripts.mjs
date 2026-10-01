@@ -84,10 +84,32 @@ export class Transcripts {
     const handle = openDb();
     try {
       const cutoff = (nowSec - this.cfg.window_days * 86400) * 1000;
-      const rows = query(handle,
-        `SELECT id,parent_id,directory,title,agent,time_created,time_updated FROM session
-         WHERE directory=? AND time_updated>=? AND time_archived IS NULL ORDER BY time_updated DESC`,
-        [this.projectDir, cutoff]);
+      const sel = `SELECT id,parent_id,directory,title,agent,time_created,time_updated FROM session`;
+      let rows = null;
+      try {
+        rows = query(handle,
+          `${sel}
+           WHERE project_id IN (SELECT project_id FROM project_directory WHERE directory=?) AND time_updated>=? AND time_archived IS NULL ORDER BY time_updated DESC`,
+          [this.projectDir, cutoff]);
+      } catch { rows = null; } // ponytail: DB lama tanpa tabel project_directory → fallback exact-match.
+      if (rows === null) {
+        rows = query(handle,
+          `${sel}
+           WHERE directory=? AND time_updated>=? AND time_archived IS NULL ORDER BY time_updated DESC`,
+          [this.projectDir, cutoff]);
+      } else if (rows.length === 0) {
+        // ponytail: COUNT ringan saja bila kosong; project lama tanpa baris project_directory → fallback.
+        let n = 0;
+        try {
+          const c = query(handle, `SELECT COUNT(*) AS n FROM session WHERE directory=? AND time_updated>=? AND time_archived IS NULL`,
+            [this.projectDir, cutoff]);
+          n = Number(c?.[0]?.n) || 0;
+        } catch { n = 0; }
+        if (n > 0) rows = query(handle,
+          `${sel}
+           WHERE directory=? AND time_updated>=? AND time_archived IS NULL ORDER BY time_updated DESC`,
+          [this.projectDir, cutoff]);
+      }
       const mains = [];
       const kids = [];
       for (const r of rows) {

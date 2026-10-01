@@ -113,6 +113,21 @@ if (up) {
   const raw = JSON.stringify(sp) + JSON.stringify(sn);
   for (const re of FORBID) check(`tidak ada kebocoran ${re}`, !re.test(raw), (raw.match(re) || [''])[0].slice(0, 60));
 
+  const [hp0, hn0] = await Promise.all([get(P, '/kerja/api/history'), get(N, '/kerja/api/history')]);
+  const [hp0j, hn0j] = [await hp0.json(), await hn0.json()];
+  const dh0 = diff(hp0j, hn0j);
+  check(`/kerja/api/history identik (${hp0j.runs?.length ?? 0} run)`, hp0.status === 200 && hn0.status === 200 && dh0.length === 0, dh0.slice(0, 10).join('; '));
+  const sinceY = new Date(Date.now() - 86400000).toISOString();
+  const [hps, hns] = await Promise.all([get(P, `/kerja/api/history?since=${encodeURIComponent(sinceY)}`), get(N, `/kerja/api/history?since=${encodeURIComponent(sinceY)}`)]);
+  const [hpsj, hnsj] = [await hps.json(), await hns.json()];
+  const dhs = diff(hpsj, hnsj);
+  check('history ?since= memfilter identik', hps.status === 200 && dhs.length === 0 && (hpsj.runs?.length ?? 0) <= (hp0j.runs?.length ?? 0), dhs.slice(0, 10).join('; '));
+  const word = String(hp0j.runs?.[0]?.task ?? '').split(/\s+/).find((w) => w.length >= 3) ?? 'a';
+  const [hpq, hnq] = await Promise.all([get(P, `/kerja/api/history?q=${encodeURIComponent(word)}`), get(N, `/kerja/api/history?q=${encodeURIComponent(word)}`)]);
+  const [hpqj, hnqj] = [await hpq.json(), await hnq.json()];
+  const dhq = diff(hpqj, hnqj);
+  check(`history ?q=${word} memfilter identik`, hpq.status === 200 && dhq.length === 0 && (hpqj.runs?.length ?? 0) <= (hp0j.runs?.length ?? 0), dhq.slice(0, 10).join('; '));
+
   const [hp, hn] = await Promise.all([get(P, '/kerja'), get(N, '/kerja')]);
   const [tp, tn] = [await hp.text(), await hn.text()];
   check('/kerja 200 di keduanya', hp.status === 200 && hn.status === 200, `${hp.status}/${hn.status}`);
