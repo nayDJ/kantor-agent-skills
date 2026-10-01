@@ -202,10 +202,13 @@ body.lapang .cards { opacity: .92; }
     <div class="stat"><small>Status</small><span class="live"><i class="dot" id="liveDot"></i><span id="liveTxt">Menghubungkan…</span></span></div>
     <div class="stat"><small>Subagent hari ini</small><b id="sToday">–</b></div>
     <div class="stat"><small>Aktif sekarang</small><b id="sActive">–</b></div>
+    <div class="stat" id="tokStat"><small>Token Ketua</small><b id="sTok">–</b></div>
     <div class="stat" id="pubStat" hidden><small>URL publik</small><a id="pubLink" href="#" target="_blank" rel="noopener noreferrer">buka</a></div>
   </div>
   <button class="toggle card-ui" id="togglePanel" type="button" title="Tombol pintas: H">Lihat kantor penuh</button>
   <select class="toggle card-ui psel" id="projSel" hidden title="Bos mengunjungi project"></select>
+  <button class="toggle card-ui" id="notifBtn" type="button" title="Aktifkan notifikasi browser saat subagent selesai atau Ketua aktif kembali (hanya saat tab tersembunyi)">Notifikasi: mati</button>
+  <button class="toggle card-ui" id="copyBtn" type="button" title="Salin ringkasan ruangan fokus">Salin ringkasan</button>
 </div>
 
 <div class="banner" id="banner" role="status"></div>
@@ -219,11 +222,13 @@ body.lapang .cards { opacity: .92; }
   <div class="tabrow"><div class="tabs" role="tablist">
     <button role="tab" data-tab="riwayat" aria-selected="true">Riwayat<span class="n" id="nRuns">0</span></button>
     <button role="tab" data-tab="tugas" aria-selected="false">Tugas <span id="tugasWho">Ketua</span><span class="n" id="nTodo">0</span></button>
+    <button role="tab" data-tab="aktivitas" aria-selected="false">Aktivitas</button>
     <button role="tab" data-tab="feed2" aria-selected="false" class="mfeed" hidden>Aktivitas</button>
   </div><button type="button" class="minbtn" data-min="right" aria-expanded="true" title="Perkecil / buka panel"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sr">Perkecil panel</span></button></div>
   <div class="scroll">
     <section class="pane on" data-pane="riwayat" id="paneRuns"></section>
     <section class="pane" data-pane="tugas" id="paneTodo"></section>
+    <section class="pane" data-pane="aktivitas" id="paneAct"></section>
     <section class="pane" data-pane="feed2"><ul class="feed" id="feed2"></ul></section>
   </div>
 </aside>
@@ -231,6 +236,6 @@ body.lapang .cards { opacity: .92; }
 <div class="cards" id="cards" aria-label="Karakter"></div>
 
 {{CONFIG_SCRIPT}}
-<script type="module" src="/kerja/assets/kantor.js?v=100"></script>
+<script type="module" src="/kerja/assets/kantor.js?v=101"></script>
 </body>
 </html>

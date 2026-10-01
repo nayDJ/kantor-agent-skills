@@ -2072,11 +2072,32 @@ function actionText(a) {
   if (!e || Date.now() - new Date(e.t).getTime() > 25000) return '';
   return clip(e.text, 48);
 }
+// ponytail: notifikasi browser opt-in; hanya saat tab tersembunyi, satu per transisi
+function notify(t, b) { try { new Notification(t, { body: b }); } catch { /* abaikan */ } }
+function notifOn() { try { return localStorage.getItem('kantor.notif') === '1'; } catch { return false; } }
+function checkNotif(d, room) {
+  const p = room._prev || (room._prev = { runs: {}, ketua: null });
+  const cur = { runs: {}, ketua: d.ketua ? d.ketua.state : null };
+  for (const m of [...(d.team || []), ...(d.freelancers || [])]) {
+    if (m && m.run && m.run.id) cur.runs[m.run.id] = m.run.status || m.state;
+  }
+  if (!room.firstLoad && notifOn() && document.hidden) {
+    for (const id of Object.keys(cur.runs)) {
+      const s0 = p.runs[id];
+      const s1 = cur.runs[id];
+      if (s0 && s0 !== s1 && (s1 === 'selesai' || s1 === 'limit' || s1 === 'terhenti')) {
+        const m = [...(d.team || []), ...(d.freelancers || [])].find((x) => x && x.run && x.run.id === id);
+        notify(`${room.title}: ${m ? m.name : 'Subagent'} selesai — ${(m && m.run && m.run.task) || s1}`);
+      }
+    }
+    if (p.ketua && p.ketua !== cur.ketua && cur.ketua === 'bekerja') notify(`${room.title}: ${(d.ketua && d.ketua.name) || KETUA_NAME} aktif kembali`);
+  }
+  room._prev = cur;
+}
 function apply(d, room) {
   room = room || FOCUS || ROOMS[0];
   if (!room) return;
-  if (maybeReload(d)) return;
-  useRoom(room);
+  if (maybeReload(d)) return;  useRoom(room);
   room.state = d;
   const firstLoad = room.firstLoad;
   const prev = room.prev;
@@ -2201,6 +2222,7 @@ function apply(d, room) {
     drawTodoBoard(d.ketua);
     drawHistBoard(d.runs);
   }
+  checkNotif(d, room);
   room.firstLoad = false;
   if (room === FOCUS) {
     S = d;
@@ -2221,6 +2243,16 @@ function renderUi(d, fresh) {
   const nToday = (d.stats.recent_starts || []).filter((s) => localDay(s) === today).length;
   $('sToday').textContent = fmtNum.format(nToday);
   $('sActive').textContent = fmtNum.format(d.stats.active);
+  // ponytail: token jujur, batas manual saja (bukan limit provider)
+  let tokWarn = 100000;
+  try { tokWarn = Number(localStorage.getItem('kantor.tokenWarn')) || 100000; } catch { /* abaikan */ }
+  const tokN = d.ketua?.tokens || 0;
+  if ($('sTok')) {
+    $('sTok').textContent = fmtCompact.format(tokN);
+    $('sTok').style.color = tokN > tokWarn ? 'var(--bad)' : '';
+  }
+  const tokStat = $('tokStat');
+  if (tokStat) tokStat.title = `Batas manual ${fmtCompact.format(tokWarn)}, klik untuk ubah`;
   const pub = typeof d.public_url === 'string' && /^https:\/\//.test(d.public_url) ? d.public_url : null;
   $('pubStat').hidden = !pub;
   if (pub) $('pubLink').href = pub;
@@ -2264,6 +2296,31 @@ function renderUi(d, fresh) {
   $('nTodo').textContent = fmtNum.format(todos ? todos.items.filter((it) => it.status !== 'completed').length : 0);
   $('paneTodo').innerHTML = `<div class="src">Sumber: <b>${todos && todos.source === 'Task' ? 'TaskCreate/TaskUpdate' : 'TodoWrite'}</b> di sesi utama${todos ? ` · diperbarui ${esc(ago(todos.at))}` : ''}</div>`
     + (todos && todos.items.length ? todos.items.map((it) => `<div class="todo s-${esc(it.status)}"><i>${it.status === 'completed' ? '✓' : it.status === 'in_progress' ? '▶' : '○'}</i><span>${esc(it.text)}</span></div>`).join('') : '<div class="empty">Belum ada daftar tugas di sesi utama.</div>');
+
+  // ponytail: sparkline 48 jam, 24 batang @2 jam, render ulang tiap apply (murah)
+  const actEl = $('paneAct');
+  if (actEl) {
+    const nowMs = d.now ? new Date(d.now).getTime() : Date.now();
+    const bk = new Array(24).fill(0);
+    for (const s of (d.stats.recent_starts || [])) {
+      const t = new Date(s).getTime();
+      if (!Number.isFinite(t)) continue;
+      const k = Math.floor((nowMs - t) / 7200000);
+      if (k >= 0 && k < 24) bk[23 - k]++;
+    }
+    const tot = bk.reduce((a, b) => a + b, 0);
+    if (!tot) actEl.innerHTML = '<div class="empty">Belum ada aktivitas 48 jam terakhir.</div>';
+    else {
+      const mx = Math.max(...bk);
+      const W = 240, H = 52;
+      let bars = '';
+      bk.forEach((n, i) => {
+        const h = n ? Math.max(2, Math.round((n / mx) * (H - 4))) : 0;
+        bars += `<rect x="${i * 10}" y="${H - h}" width="8" height="${h}" rx="1.5" fill="#1f9d57"><title>${n} mulai</title></rect>`;
+      });
+      actEl.innerHTML = `<svg viewBox="0 0 ${W} 64" width="100%" height="64" role="img" aria-label="Aktivitas 48 jam terakhir">${bars}<text x="0" y="63" font-size="8" fill="#8f887e">${esc(hhmm(new Date(nowMs - 172800000).toISOString()))}</text><text x="${W}" y="63" font-size="8" fill="#8f887e" text-anchor="end">${esc(hhmm(new Date(nowMs).toISOString()))}</text></svg>`;
+    }
+  }
 
   // kartu
   const k = d.ketua;
@@ -2339,6 +2396,58 @@ function setLapang(on) {
   onResize();
 }
 $('togglePanel').onclick = () => setLapang(!document.body.classList.contains('lapang'));
+// ponytail: notifikasi browser opt-in, default mati (pref kantor.notif)
+function paintNotif() {
+  const b = $('notifBtn');
+  if (!b) return;
+  let on = false;
+  try { on = localStorage.getItem('kantor.notif') === '1'; } catch { /* abaikan */ }
+  const blocked = typeof Notification !== 'undefined' && Notification.permission === 'denied';
+  b.textContent = on ? 'Notifikasi: hidup' : blocked ? 'Notifikasi: diblokir' : 'Notifikasi: mati';
+}
+paintNotif();
+const notifBtn = $('notifBtn');
+if (notifBtn) notifBtn.onclick = async () => {
+  if (notifOn()) { try { localStorage.setItem('kantor.notif', '0'); } catch { /* abaikan */ } paintNotif(); return; }
+  try {
+    const r = await Notification.requestPermission();
+    try { localStorage.setItem('kantor.notif', r === 'granted' ? '1' : '0'); } catch { /* abaikan */ }
+  } catch { try { localStorage.setItem('kantor.notif', '0'); } catch { /* abaikan */ } }
+  paintNotif();
+};
+// ponytail: batas manual token + salin ringkasan fokus (tanpa klaim limit provider)
+const tokStatBtn = $('tokStat');
+if (tokStatBtn) tokStatBtn.onclick = () => {
+  let cur = 100000;
+  try { cur = Number(localStorage.getItem('kantor.tokenWarn')) || 100000; } catch { /* abaikan */ }
+  const v = prompt('Batas token manual', String(cur));
+  if (v === null) return;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return;
+  try { localStorage.setItem('kantor.tokenWarn', String(Math.round(n))); } catch { /* abaikan */ }
+  if (S) renderUi(S, new Set());
+};
+const copyBtn = $('copyBtn');
+if (copyBtn) copyBtn.onclick = async () => {
+  const d = S;
+  if (!d) return;
+  const runs = d.runs || [];
+  const m = runs.reduce((a, r) => a + (r.tools || 0), 0) + (d.ketua?.tools || 0);
+  const txt = `Sesi ${String(d.now || '').slice(0, 10)}: ${(d.ketua && d.ketua.name) || KETUA_NAME} + ${runs.length} subagent, ${m} tool calls, ${fmtCompact.format(d.ketua?.tokens || 0)} token.`;
+  try {
+    await navigator.clipboard.writeText(txt);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = txt;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch { /* abaikan */ }
+    ta.remove();
+  }
+  const orig = 'Salin ringkasan';
+  copyBtn.textContent = 'Tersalin!';
+  setTimeout(() => { copyBtn.textContent = orig; }, 1500);
+};
 addEventListener('keydown', (e) => {
   if ((e.key === 'h' || e.key === 'H') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.target.closest('input,textarea,[contenteditable]')) setLapang(!document.body.classList.contains('lapang'));
 });
