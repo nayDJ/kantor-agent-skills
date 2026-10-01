@@ -1769,7 +1769,7 @@ function arrive(a, instant = false) {
       a.p.root.rotation.set(0, a.heading, 0);
     } else a.heading = pl.heading;
     if (a.inLounge) delete a.portal;
-    else if (a.portal && /^spot:(bed|billiard|kopi[1-4])$/.test(goalRaw(a))) delete a.portal;
+    else if (a.portal) delete a.portal; // ponytail: tiba spot rumah + portal nyangkut = perjalanan digantikan
     if (!instant && Math.random() < 0.55 && performance.now() > a.bubble.until) say(a, pickOne(QUIPS[pl.spot] || ['Santai dulu']));
   }
 }
@@ -2474,7 +2474,7 @@ function apply(d, room) {
       else goTo(KETUA, 'desk:A0');
     } else if (firstLoad) placeAt(KETUA, 'desk:A0');
     else goTo(KETUA, 'desk:A0');
-  } else if (!goalRaw(KETUA).startsWith('spot:') || firstLoad) lounge(KETUA, now, firstLoad);
+  } else if (!KETUA.portal && !KETUA.inLounge && (!goalRaw(KETUA).startsWith('spot:') || firstLoad)) lounge(KETUA, now, firstLoad); // ponytail: jangan batalkan jalan/pulang santai
   if (live && kPrev && kPrev.state === 'bekerja' && d.ketua?.state === 'selesai') say(KETUA, 'Beres, menunggu instruksi berikutnya', 3800, 'hi');
   prev.set(KETUA.key, { state: d.ketua?.state });
 
@@ -2507,7 +2507,7 @@ function apply(d, room) {
       }
     } else {
       if (live && p && p.state === 'bekerja') say(a, 'Beres!', 3600, 'hi');
-      if (!goalRaw(a).startsWith('spot:') || firstLoad) lounge(a, now, firstLoad);
+      if (!a.portal && !a.inLounge && (!goalRaw(a).startsWith('spot:') || firstLoad)) lounge(a, now, firstLoad); // ponytail: jangan batalkan jalan/pulang santai
     }
     prev.set(a.key, { state: m.state, runId: m.run?.id ?? null });
   });
@@ -3027,7 +3027,7 @@ let gameAt = 0;
 let tvMode = 'tv';
 function updateActor(a, dt, t, now) {
   // pilih tempat santai baru bila waktunya; kunjungan santai: peluang kecil per detik
-  if (!a.work && !a.leaving && a.kind !== 'freelancer' && !a.walking) {
+  if (!a.work && !a.leaving && a.kind !== 'freelancer' && !a.walking && !a.portal) { // ponytail: portal = transit santai, jangan timpa
     lounge(a, now, false);
     if (!a.walking && Math.random() < dt * 0.03) visitLounge(a, now);
   }
