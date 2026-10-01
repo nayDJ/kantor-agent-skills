@@ -108,6 +108,19 @@ bash <skill-dir>/runtime/bin/kantor.sh start --project ~/toko-kue --project ~/be
 Tiap project = satu ruangan dengan Ketua + timnya sendiri. Tiap project memakai config
 `.opencode/kantor-agent.json`-nya masing-masing.
 
+### Menambah project baru
+Server tidak menyimpan daftar project — "menambah" artinya restart dengan daftar **lengkap** (lama + baru):
+```bash
+bash <skill-dir>/runtime/bin/kantor.sh restart \
+  --project ~/toko-kue \
+  --project ~/bengkel-motor \
+  --project ~/project-baru
+```
+Catatan: project yang tidak disebut ikut hilang dari tampilan; ganti contoh path di atas dengan path asli
+(server menolak folder yang tidak ada); port geser otomatis bila sibuk — buka URL yang tercetak, bukan yang
+dihafal; project tanpa sesi tampil sepi (bukan error); halaman tak berubah setelah restart = cache browser,
+hard-refresh (`Ctrl+Shift+R`).
+
 ## Ruangan
 Satu kantor besar berisi N ruangan — tiap project = satu ruangan dengan Ketua + timnya sendiri.
 Klik ruangan atau dropdown untuk fokus (+ `?room=` di URL); kartu, feed, riwayat, dan tugas mengikuti ruangan fokus.
