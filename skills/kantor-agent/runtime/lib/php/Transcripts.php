@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/Util.php';
 require_once __DIR__ . '/Kiro.php';
+require_once __DIR__ . '/Claude.php';
 
 /**
  * Ringkasan sesi OpenCode dari SQLite (~/.local/share/opencode/opencode.db) — read-only.
@@ -62,7 +63,7 @@ final class KTranscripts
     /** @return array{exists:bool,runs:list<array<string,mixed>>,mains:list<array<string,mixed>>} */
     public function scan(int $nowSec): array
     {
-        // ponytail: dua sumber (OpenCode DB + Kiro CLI) digabung; office yang memilih Ketua & membagi tim.
+        // ponytail: tiga sumber (OpenCode DB + Kiro CLI + Claude Code) digabung; office yang memilih Ketua & membagi tim.
         $oc = ['exists' => false, 'runs' => [], 'mains' => []];
         if (is_file(self::dbPath())) {
             try {
@@ -73,8 +74,9 @@ final class KTranscripts
             }
         }
         $k = (new KKiro($this->projectDir, $this->storageDir, $this->cfg))->scan($nowSec);
-        return ['exists' => $oc['exists'] || $k['exists'],
-            'runs' => [...$oc['runs'], ...$k['runs']], 'mains' => [...$oc['mains'], ...$k['mains']]];
+        $c = (new KClaude($this->projectDir, $this->storageDir, $this->cfg))->scan($nowSec);
+        return ['exists' => $oc['exists'] || $k['exists'] || $c['exists'],
+            'runs' => [...$oc['runs'], ...$k['runs'], ...$c['runs']], 'mains' => [...$oc['mains'], ...$k['mains'], ...$c['mains']]];
     }
 
     /** @return array{exists:bool,runs:list<array<string,mixed>>,mains:list<array<string,mixed>>} */

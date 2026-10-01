@@ -89,6 +89,8 @@ elif [ -n "${XDG_DATA_HOME:-}" ]; then OPENCODE_DB_PATH="${XDG_DATA_HOME%/}/open
 else OPENCODE_DB_PATH="$HOME/.local/share/opencode/opencode.db"; fi
 if [ -n "${KIRO_SESSIONS_DIR:-}" ]; then KIRO_DIR="$KIRO_SESSIONS_DIR"
 else KIRO_DIR="$HOME/.kiro/sessions/cli"; fi
+if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then CLAUDE_DIR="$CLAUDE_CONFIG_DIR"
+else CLAUDE_DIR="$HOME/.claude"; fi
 
 cfg_value() { # nilai sederhana dari config JSON opsional (angka/boolean) tanpa bergantung pada runtime
   [ -f "$CONFIG" ] || return 0
@@ -280,6 +282,10 @@ for f in glob.glob(sys.argv[1] + '/*.json'):
     else: m += 1
 print('sesi utama ' + str(m) + ', subagent ' + str(k))" "$KIRO_DIR" "$P" 2>/dev/null || echo 'tidak terbaca')"
     else say "  Kiro     : belum ada ($KIRO_DIR)"; fi
+    if [ -d "$CLAUDE_DIR/projects" ]; then
+      say "  Claude   : ada ($(find "$CLAUDE_DIR/projects" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ') project) ($CLAUDE_DIR)"
+    elif [ -d "$CLAUDE_DIR" ]; then say "  Claude   : ada (0 project) ($CLAUDE_DIR)"
+    else say "  Claude   : belum ada ($CLAUDE_DIR)"; fi
     done ;;
   tunnel)
     command -v cloudflared >/dev/null 2>&1 || die "cloudflared belum terpasang (macOS: brew install cloudflared · Linux: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)."
@@ -324,6 +330,9 @@ print('sesi utama ' + str(m) + ', subagent ' + str(k))" "$KIRO_DIR" "$P" 2>/dev/
     if [ "$MULTI" = 1 ]; then printf '%s\n' "$PROJECTS_NL" | while IFS= read -r d; do echo "  project+    $d"; done; fi
     [ -f "$OPENCODE_DB_PATH" ] && echo "  opencode.db ada ($OPENCODE_DB_PATH)" || echo "  opencode.db belum ada ($OPENCODE_DB_PATH)"
     [ -d "$KIRO_DIR" ] && echo "  kiro sesi ada ($KIRO_DIR)" || echo "  kiro sesi belum ada ($KIRO_DIR)"
+    if [ -d "$CLAUDE_DIR/projects" ]; then echo "  claude ada ($CLAUDE_DIR, $(find "$CLAUDE_DIR/projects" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ') project)"
+    elif [ -d "$CLAUDE_DIR" ]; then echo "  claude ada ($CLAUDE_DIR, 0 project)"
+    else echo "  claude belum ada ($CLAUDE_DIR)"; fi
     echo "  data server $STATE" ;;
   *) echo "Perintah tidak dikenal: $CMD (start|stop|restart|status|url|tunnel|tunnel-stop|autostart|detect)" >&2; exit 2 ;;
 esac

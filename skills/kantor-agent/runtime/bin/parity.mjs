@@ -211,6 +211,42 @@ if (up) {
   } catch {
     /* abaikan */
   }
+
+  // claude fixture: 1 sesi utama + 1 subagent (agent-*.jsonl + .meta.json) via CLAUDE_CONFIG_DIR sintetis
+  const CFIX = fs.mkdtempSync(path.join(os.tmpdir(), 'kantor-parity-claude-'));
+  const munged = PROJECT.replace(/[^a-zA-Z0-9]/g, '-');
+  const cRoot = path.join(CFIX, 'projects', munged);
+  const cSub = path.join(cRoot, 'sess-claude', 'subagents');
+  fs.mkdirSync(cSub, { recursive: true });
+  const t0 = new Date(Date.now() - 60000).toISOString();
+  const t1 = new Date().toISOString();
+  const mainLines = [
+    JSON.stringify({ type: 'user', timestamp: t0, message: { role: 'user', content: 'halo' }, isSidechain: false }),
+    JSON.stringify({ type: 'assistant', timestamp: t1, message: { id: 'm1', role: 'assistant', content: [{ type: 'text', text: 'oke' }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }),
+  ].join('\n') + '\n';
+  fs.writeFileSync(path.join(cRoot, 'main-claude.jsonl'), mainLines);
+  fs.writeFileSync(path.join(cSub, 'agent-abc123.jsonl'), mainLines);
+  fs.writeFileSync(path.join(cSub, 'agent-abc123.meta.json'), JSON.stringify({ agentType: 'Explore', description: 'cari file', parentAgentId: null }));
+  const PP3 = PHP_PORT + 20;
+  const NP3 = NODE_PORT + 20;
+  const phpErr3 = start('php', ['-S', `127.0.0.1:${PP3}`, '-t', 'public', 'public/index.php'], { CLAUDE_CONFIG_DIR: CFIX });
+  const nodeErr3 = start(process.execPath, ['bin/serve-node.mjs'], { KANTOR_PORT: String(NP3), KANTOR_BIND: '127.0.0.1', CLAUDE_CONFIG_DIR: CFIX });
+  const P3 = `http://127.0.0.1:${PP3}`;
+  const N3 = `http://127.0.0.1:${NP3}`;
+  const up3 = (await waitUp(P3, 'PHP-claude', phpErr3)) & (await waitUp(N3, 'Node-claude', nodeErr3));
+  if (up3) {
+    const [cp, cn] = await Promise.all([get(P3, '/kerja/api/state'), get(N3, '/kerja/api/state')]);
+    const [sp3, sn3] = [await cp.json(), await cn.json()];
+    const dc = diff(sp3, sn3, '$', new Set(['now']));
+    check(`state fixture Claude identik (${sp3.runs?.length ?? 0} run)`, dc.length === 0, dc.slice(0, 10).join('; '));
+    const hasC = (s) => (s.runs || []).some((r) => r.task === 'cari file' && r.agent_type === 'Explore');
+    check('state ronde mencakup run Claude', hasC(sp3) && hasC(sn3), `PHP ${hasC(sp3)} / Node ${hasC(sn3)}`);
+  }
+  try {
+    fs.rmSync(CFIX, { recursive: true, force: true });
+  } catch {
+    /* abaikan */
+  }
 }
 
 cleanup();

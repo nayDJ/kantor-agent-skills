@@ -12,6 +12,7 @@ import {
   oneLine, safeLine, strcmp,
 } from './util.mjs';
 import { Kiro } from './kiro.mjs';
+import { Claude } from './claude.mjs';
 
 const CACHE_V = 3;
 const EVENTS_KEEP = 40;
@@ -67,7 +68,7 @@ export class Transcripts {
   }
 
   scan(nowSec) {
-    // ponytail: dua sumber (OpenCode DB + Kiro CLI) digabung; office yang memilih Ketua & membagi tim.
+    // ponytail: tiga sumber (OpenCode DB + Kiro CLI + Claude Code) digabung; office yang memilih Ketua & membagi tim.
     let oc = { exists: false, runs: [], mains: [] };
     if (isFile(opencodeDb())) {
       try {
@@ -77,7 +78,8 @@ export class Transcripts {
       }
     }
     const k = new Kiro(this.projectDir, this.storageDir, this.cfg).scan(nowSec);
-    return { exists: oc.exists || k.exists, runs: [...oc.runs, ...k.runs], mains: [...oc.mains, ...k.mains] };
+    const c = new Claude(this.projectDir, this.storageDir, this.cfg).scan(nowSec);
+    return { exists: oc.exists || k.exists || c.exists, runs: [...oc.runs, ...k.runs, ...c.runs], mains: [...oc.mains, ...k.mains, ...c.mains] };
   }
 
   scanDb(nowSec) {
