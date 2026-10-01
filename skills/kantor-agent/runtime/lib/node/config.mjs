@@ -22,7 +22,6 @@ function parse(file) {
   }
 }
 const num = (v, d) => (Number.isInteger(v) && v > 0 ? v : d);
-const cleanLayout = (v) => (v === 'pantai' ? 'pantai' : 'kantor');
 
 export function loadDefaults(runtimeDir) {
   const d = JSON.parse(readText(path.join(runtimeDir, 'defaults.json')) ?? 'null');
@@ -52,6 +51,5 @@ export function loadConfig(runtimeDir, projectDir) {
     cooldown: num(d.cooldown, 60),
     spare_desks: num(d.spare_desks, 4),
     mains_max: num(d.mains_max, 40),
-    layout: cleanLayout(c.layout),
   };
 }

@@ -16,13 +16,16 @@ const KETUA_NAME = typeof CFG.ketua === 'string' ? CFG.ketua : 'Joko';
 const COLORS = CFG.colors || { ketua: '#6a55c9', team: ['#3f6fd1', '#2f9a6d', '#d9772f', '#c2417a'], freelancers: ['#0f8fa3'] };
 const NAMES_SIG = [KETUA_NAME, ...TEAM_NAMES].join('|');
 const SPARE = Math.max(0, Math.min(4, Number(CFG.spare_desks) || 4));
-// Bos keliling: ?project=<id> (lihat /kerja/api/projects), ?layout=kantor|pantai (override sesi, default dari config project)
+// T6: N ruangan = N project. Fokus awal dari ?room= (atau ?project= lama).
 const QS = new URLSearchParams(location.search);
 const PROJ_Q = QS.get('project') || '';
-const LAYOUT = QS.get('layout') === 'pantai' ? 'pantai' : QS.get('layout') === 'kantor' ? 'kantor' : (CFG.layout === 'pantai' ? 'pantai' : 'kantor');
-const IS_PANTAI = LAYOUT === 'pantai';
-let seaMesh = null; // ponytail: satu-satunya animasi pantai — sisanya geometri statis.
-const API = API_BASE + (PROJ_Q ? `?project=${encodeURIComponent(PROJ_Q)}` : '');
+const FOCUS_Q = QS.get('room') || PROJ_Q || '';
+const PROJECTS = Array.isArray(CFG.projects) && CFG.projects.length
+  ? CFG.projects
+  : [{ id: PROJ_Q || CFG.current || 'main', title: CFG.title || 'Kantor' }];
+const API = API_BASE + (PROJ_Q && PROJECTS.length < 2 ? `?project=${encodeURIComponent(PROJ_Q)}` : '');
+let FOCUS = null; // Room fokus (kartu/feed/riwayat/tugas)
+const roomHit = []; // mesh lantai/papan → klik untuk fokus
 function gotoQS(patch) {
   const q = new URLSearchParams(location.search);
   for (const [k, v] of Object.entries(patch)) {
@@ -31,25 +34,35 @@ function gotoQS(patch) {
   }
   location.search = q.toString();
 }
+function setFocus(id, push = true) {
+  const r = ROOMS.find((x) => x.id === id) || FOCUS || ROOMS[0];
+  if (!r) return;
+  FOCUS = r;
+  useRoom(r);
+  const sel = document.getElementById('projSel');
+  if (sel && sel.value !== r.id) sel.value = r.id;
+  if (push) {
+    const q = new URLSearchParams(location.search);
+    q.set('room', r.id);
+    history.replaceState(null, '', `${location.pathname}?${q.toString()}${location.hash}`);
+  }
+  if (r.state) renderUi(r.state, r.fresh || new Set());
+}
 (function initHub() {
   const sel = document.getElementById('projSel');
-  if (sel && Array.isArray(CFG.projects) && CFG.projects.length > 1) {
+  if (sel && PROJECTS.length > 1) {
     sel.hidden = false;
-    for (const p of CFG.projects) {
+    for (const p of PROJECTS) {
       const o = document.createElement('option');
       o.value = p.id;
       o.textContent = p.title;
-      if (p.id === CFG.current) o.selected = true;
+      if (p.id === (FOCUS_Q || CFG.current)) o.selected = true;
       sel.appendChild(o);
     }
-    sel.addEventListener('change', () => gotoQS({ project: sel.value }));
-  }
-  const lb = document.getElementById('layoutBtn');
-  if (lb) {
-    lb.hidden = false;
-    lb.textContent = IS_PANTAI ? 'Kantor' : 'Pantai';
-    lb.title = IS_PANTAI ? 'Kembali ke kantor' : 'Pindah ke pantai';
-    lb.addEventListener('click', () => gotoQS({ layout: IS_PANTAI ? 'kantor' : 'pantai' }));
+    sel.addEventListener('change', () => {
+      if (ROOMS.length) setFocus(sel.value);
+      else gotoQS({ room: sel.value });
+    });
   }
 })();
 
@@ -236,19 +249,75 @@ const SANS = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial
 const MONO = 'ui-monospace, Menlo, Consolas, monospace';
 const V = (x, z) => new THREE.Vector3(x, 0, z);
 
-// ---------------------------------------------------------------- ruangan
-const ROOM = { x0: -10, x1: 10, z0: -7, z1: 6, h: 5.2 };
+// ---------------------------------------------------------------- ruangan (T5: N ruangan berjajar, ox = indeks*22)
+// Tiap ruangan = satu project. Fungsi murni dipakai ulang apa adanya dengan offset X;
+// registries per-room dipegang objek Room di ROOMS[]. Tahap infra: N=1 (ox=0, identik).
+const ROOM_W = 22;
+const ROOMS = []; // Room {id,title,ox,desks,places,actors,ketua,team,door,loungeAt,pads,...}
+// ponytail: konteks aktif = ROOMS[0]; poll/apply/frame/renderUi beroperasi di sini sampai task berikut memecahnya.
+let ROOM = null;
+let MEET = null;
+let DESK_DEFS = [];
+let desks = {};
+let PLACES = {};
+let SPOTS = {};
+let SPOT_IDS = [];
+let actors = new Map();
+let KETUA = null;
+let TEAM = [];
+let door = null;
+let LOUNGE = null;
+let LOUNGE_PADS = [];
+let windows = [];
+let todoBoard = null;
+let histBoard = null;
 const CORRIDOR_Z = -2.1;
-(function buildRoom() {
-  if (IS_PANTAI) return; // pantai dibangun belakangan (butuh helper box/monitor yang didefinisikan di bawah)
+// T6: konteks aktif + placeId namespaced `<roomId>::<pid>` (pid mentah: desk:/spot:/door)
+function useRoom(room) {
+  if (!room) return;
+  ROOM = room.bounds;
+  MEET = room.meet;
+  DESK_DEFS = room.deskDefs;
+  desks = room.desks;
+  PLACES = room.places;
+  SPOTS = room.spots;
+  SPOT_IDS = room.spotIds;
+  actors = room.actors;
+  KETUA = room.ketua;
+  TEAM = room.team;
+  door = room.door;
+  LOUNGE = room.loungeAt;
+  LOUNGE_PADS = room.pads;
+  todoBoard = room.todoBoard;
+  histBoard = room.histBoard;
+  windows = room.windows;
+}
+const rawPid = (pid) => {
+  const s = String(pid || '');
+  const i = s.indexOf('::');
+  return i >= 0 ? s.slice(i + 2) : s;
+};
+const nsPid = (room, pid) => `${room.id}::${rawPid(pid)}`;
+function roomOf(a) {
+  if (a?.room) return a.room;
+  const k = String(a?.key || '');
+  const i = k.indexOf(':');
+  const id = i >= 0 ? k.slice(0, i) : '';
+  return ROOMS.find((r) => r.id === id) || FOCUS || ROOMS[0];
+}
+const goalRaw = (a) => rawPid(a?.goal);
+const roomHue = (id) => hash(id) % 360;
+function buildRoomShell(roomId) {
   const fl = canvasTex(1024, 1024);
-  const r = rng(11);
+  const single = PROJECTS.length < 2;
+  const hue = single ? 0 : roomHue(roomId || '');
+  const r = rng(single ? 11 : 11 + (hue % 97));
   const plankH = 64;
   for (let y = 0; y < 1024; y += plankH) {
     let x = -Math.floor(r() * 300);
     while (x < 1024) {
       const w = 260 + r() * 260;
-      fl.ctx.fillStyle = `hsl(${30 + r() * 6}, ${38 + r() * 8}%, ${62 + r() * 10}%)`;
+      fl.ctx.fillStyle = single ? `hsl(${30 + r() * 6}, ${38 + r() * 8}%, ${62 + r() * 10}%)` : `hsl(${(30 + r() * 6 + (hue % 36) + 360) % 360}, ${38 + r() * 8}%, ${62 + r() * 10}%)`;
       fl.ctx.fillRect(x, y, w, plankH);
       fl.ctx.fillStyle = 'rgba(90,60,30,.10)';
       for (let g = 0; g < 5; g++) fl.ctx.fillRect(x, y + 8 + r() * 48, w, 1.5);
@@ -268,6 +337,8 @@ const CORRIDOR_Z = -2.1;
   const floor = mesh(new THREE.PlaneGeometry(W, D).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: fl.tex, roughness: 0.72 }), { cast: false });
   floor.position.set(cx, 0, cz);
   scene.add(floor);
+  floor.userData.roomId = roomId;
+  roomHit.push(floor);
   const slab = mesh(new THREE.BoxGeometry(W + 0.6, 0.35, D + 0.6), mat('#d8cdbf', 0.9), { cast: false });
   slab.position.set(cx, -0.18, cz - 0.15);
   scene.add(slab);
@@ -297,10 +368,10 @@ const CORRIDOR_Z = -2.1;
     wain.position.set(ROOM.x0 + 0.02, 0.5, (z0 + z1) / 2);
     scene.add(bb, wain);
   }
-})();
+}
 
 // pintu kantor (jalur masuk/keluar freelancer) — daun pintu berayun terbuka saat ada yang lewat
-const door = (() => {
+function buildDoor() {
   const g = new THREE.Group();
   const frameM = mat('#fbfaf7', 0.6);
   const W = 1.1;
@@ -340,10 +411,9 @@ const door = (() => {
   g.position.set(ROOM.x0, 0, CORRIDOR_Z);
   scene.add(g);
   return { hinge, open: 0 };
-})();
+}
 
 // jendela dengan langit (siang/malam mengikuti jam penonton)
-const windows = [];
 function buildWindow(cx, cy, w, h) {
   const sky = canvasTex(256, 256);
   const glass = mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: sky.tex, toneMapped: false }), { cast: false });
@@ -361,10 +431,13 @@ function buildWindow(cx, cy, w, h) {
   scene.add(sill);
   windows.push(sky);
 }
-buildWindow(3.5, 2.75, 2.0, 2.0);
-buildWindow(6.3, 2.75, 2.0, 2.0);
+function buildRoomWindows(ox) {
+  buildWindow(3.5 + ox, 2.75, 2.0, 2.0);
+  buildWindow(6.3 + ox, 2.75, 2.0, 2.0);
+}
 function paintSky(night) {
-  for (const s of windows) {
+  const all = ROOMS.length ? ROOMS.flatMap((r) => r.windows) : windows;
+  for (const s of all) {
     const g = s.ctx.createLinearGradient(0, 0, 0, 256);
     g.addColorStop(0, night ? '#1d2745' : '#9fd0f5');
     g.addColorStop(1, night ? '#3a3f63' : '#e7f3fb');
@@ -704,31 +777,31 @@ function tvCorner(x, y, z) {
 }
 drawTv();
 
-const MEET = { x: -5.2, z: 3.7 };
-const LOUNGE_PADS = [];
-(function buildFurniture() {
+function buildFurniture(ox) {
+  MEET = { x: -5.2 + ox, z: 3.7 };
+  LOUNGE_PADS = [];
   bookshelf(ROOM.x0 + 0.25, 3.8, Math.PI / 2);
   plant(ROOM.x0 + 0.6, ROOM.z0 + 0.6, 1.25, 2);
-  plant(6.6, ROOM.z0 + 0.6, 1.0, 4);
+  plant(6.6 + ox, ROOM.z0 + 0.6, 1.0, 4);
   plant(ROOM.x0 + 0.6, 1.2, 1.0, 6);
   plant(ROOM.x1 - 0.7, 5.2, 1.3, 8);
-  plant(7.4, 2.3, 0.9, 14);
+  plant(7.4 + ox, 2.3, 0.9, 14);
   // pojok kopi (dinding belakang kanan)
   const counter = mesh(box(2.4, 0.95, 0.9, 0.03), mat('#ece5da', 0.7));
-  counter.position.set(8.2, 0.475, ROOM.z0 + 0.55);
+  counter.position.set(8.2 + ox, 0.475, ROOM.z0 + 0.55);
   const top = mesh(box(2.5, 0.05, 0.98, 0.02), mat('#8c6a4f', 0.5));
-  top.position.set(8.2, 0.97, ROOM.z0 + 0.55);
+  top.position.set(8.2 + ox, 0.97, ROOM.z0 + 0.55);
   const shelf = mesh(box(1.6, 0.04, 0.3, 0.01), mat('#8c6a4f', 0.5));
-  shelf.position.set(8.2, 1.75, ROOM.z0 + 0.18);
-  scene.add(counter, top, shelf, espressoMachine(7.7, 0.995, ROOM.z0 + 0.55));
+  shelf.position.set(8.2 + ox, 1.75, ROOM.z0 + 0.18);
+  scene.add(counter, top, shelf, espressoMachine(7.7 + ox, 0.995, ROOM.z0 + 0.55));
   const disp = waterDispenser(ROOM.x1 - 0.45, 0, ROOM.z0 + 1.55);
   disp.rotation.y = -Math.PI / 2;
   scene.add(disp);
   [['#e8e2d6', 8.85], ['#3f6fd1', 9.1], ['#d9772f', 8.6]].forEach(([c, x]) => {
     const m = mugMesh(c);
-    m.position.set(x, 0.995, ROOM.z0 + 0.7);
+    m.position.set(x + ox, 0.995, ROOM.z0 + 0.7);
     const sm = mugMesh(c);
-    sm.position.set(x - 0.9, 1.77, ROOM.z0 + 0.18);
+    sm.position.set(x + ox - 0.9, 1.77, ROOM.z0 + 0.18);
     scene.add(m, sm);
   });
   // meja rapat bundar + karpet (depan kiri)
@@ -759,18 +832,9 @@ const LOUNGE_PADS = [];
   scene.add(laptop);
   // sudut santai: sofa menghadap TV
   const lounge = new THREE.Group();
-  lounge.position.set(4.9, 0, 1.45);
+  lounge.position.set(4.9 + ox, 0, 1.45);
   lounge.rotation.y = Math.PI;
   const fabric = mat('#6f8f86', 0.95);
-  if (IS_PANTAI) {
-    // beanbag, bukan sofa — posisi & sit('sofa') sama, mesh saja beda.
-    for (const s of [-1, 1]) {
-      const bag = mesh(new THREE.SphereGeometry(0.55, 18, 14), mat(s < 0 ? '#d9772f' : '#2f9a6d', 0.95));
-      bag.scale.y = 0.62;
-      bag.position.set(s * 0.62, 0.34, 0);
-      lounge.add(bag);
-    }
-  } else {
   const sofaBase = mesh(box(2.6, 0.42, 0.95, 0.12), fabric);
   sofaBase.position.set(0, 0.3, 0);
   const sofaBack = mesh(box(2.6, 0.62, 0.25, 0.1), fabric);
@@ -789,7 +853,6 @@ const LOUNGE_PADS = [];
   const low = mesh(box(1.2, 0.06, 0.6, 0.03), mat('#8c6a4f', 0.5));
   low.position.set(0, 0.42, 1.05);
   lounge.add(pillow, low);
-  }
   for (const [lx, lz] of [[-0.5, 0.8], [0.5, 0.8], [-0.5, 1.3], [0.5, 1.3]]) {
     const lg = mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.4, 8), mat('#3a3d44', 0.4, 0.5));
     lg.position.set(lx, 0.2, lz);
@@ -811,14 +874,18 @@ const LOUNGE_PADS = [];
   pad2.rotation.y = -0.3;
   lounge.add(pad1, pad2);
   LOUNGE_PADS.push(pad1, pad2);
-  scene.add(lounge, tvCorner(4.9, 0, -1.3));
-})();
+  scene.add(lounge, tvCorner(4.9 + ox, 0, -1.3));
+}
 
 // ---------------------------------------------------------------- papan dinding
-function wallBoard({ w, h, cw, ch, pos, rotY }) {
+function wallBoard({ w, h, cw, ch, pos, rotY, roomId }) {
   const g = new THREE.Group();
   g.position.copy(pos);
   g.rotation.y = rotY;
+  if (roomId) {
+    g.userData.roomId = roomId;
+    g.traverse?.((o) => {});
+  }
   const t = canvasTex(cw, ch);
   const face = mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: t.tex, roughness: 0.35 }), { cast: false });
   face.position.z = 0.03;
@@ -839,19 +906,46 @@ function wallBoard({ w, h, cw, ch, pos, rotY }) {
     g.add(mk);
   });
   scene.add(g);
+  if (g.userData.roomId) for (const m of g.children) {
+    m.userData.roomId = g.userData.roomId;
+    roomHit.push(m);
+  }
   return t;
 }
-const todoBoard = wallBoard({ w: 6.0, h: 2.5, cw: 2048, ch: 854, pos: new THREE.Vector3(-1.0, 2.8, ROOM.z0 + 0.02), rotY: 0 });
-const histBoard = wallBoard({ w: 4.2, h: 2.4, cw: 1792, ch: 1024, pos: new THREE.Vector3(-7.2, 2.8, ROOM.z0 + 0.02), rotY: 0 });
+function buildNameBoard(roomId, title, ox) {
+  const t = canvasTex(1024, 192);
+  t.ctx.fillStyle = '#2f2a26';
+  t.ctx.fillRect(0, 0, 1024, 192);
+  t.ctx.fillStyle = `hsl(${roomHue(roomId) % 360}, 45%, 55%)`;
+  t.ctx.fillRect(0, 0, 24, 192);
+  t.ctx.fillStyle = '#fbfaf7';
+  t.ctx.font = `700 84px ${SANS}`;
+  t.ctx.textBaseline = 'middle';
+  t.ctx.fillText(fit(t.ctx, title || roomId, 940), 48, 100);
+  t.tex.needsUpdate = true;
+  const face = mesh(new THREE.PlaneGeometry(3.2, 0.6), new THREE.MeshStandardMaterial({ map: t.tex, roughness: 0.5 }), { cast: false });
+  face.position.set(ROOM.x0 + 0.18, 2.95, CORRIDOR_Z);
+  face.rotation.y = Math.PI / 2;
+  face.userData.roomId = roomId;
+  roomHit.push(face);
+  scene.add(face);
+  return t;
+}
+function buildBoards(ox, roomId, title) {
+  todoBoard = wallBoard({ w: 6.0, h: 2.5, cw: 2048, ch: 854, pos: new THREE.Vector3(-1.0 + ox, 2.8, ROOM.z0 + 0.02), rotY: 0, roomId });
+  histBoard = wallBoard({ w: 4.2, h: 2.4, cw: 1792, ch: 1024, pos: new THREE.Vector3(-7.2 + ox, 2.8, ROOM.z0 + 0.02), rotY: 0, roomId });
+  buildNameBoard(roomId, title, ox);
+  buildRoomClock(ox);
+}
 
 const clockTex = canvasTex(256, 256);
-(function buildClock() {
+function buildRoomClock(ox) {
   const face = mesh(new THREE.CircleGeometry(0.42, 48), new THREE.MeshStandardMaterial({ map: clockTex.tex, roughness: 0.4 }), { cast: false });
-  face.position.set(8.6, 3.4, ROOM.z0 + 0.05);
+  face.position.set(8.6 + ox, 3.4, ROOM.z0 + 0.05);
   const rim = mesh(new THREE.TorusGeometry(0.43, 0.035, 10, 48), mat('#3a3d44', 0.4, 0.4));
   rim.position.copy(face.position);
   scene.add(face, rim);
-})();
+}
 function drawClock() {
   const { ctx, tex } = clockTex;
   const now = new Date();
@@ -1155,12 +1249,15 @@ function monitor(w, h) {
 // meja: A0 = Ketua, A1–A4 = tim, B0–B3 = meja cadangan freelancer
 const ROW_A_Z = -4.3;
 const ROW_B_Z = -0.7;
-const DESK_DEFS = [
-  { id: 'A0', x: -7.0, z: ROW_A_Z, kind: 'ketua', color: COLORS.ketua },
-  ...TEAM_NAMES.map((n, i) => ({ id: `A${i + 1}`, x: -4.2 + i * 2.8, z: ROW_A_Z, kind: 'tim', idx: i, color: COLORS.team[i % COLORS.team.length] })),
-  ...Array.from({ length: SPARE }, (_, j) => ({ id: `B${j}`, x: -7.0 + j * 2.8, z: ROW_B_Z, kind: 'spare', idx: j, color: '#9a938a', gap: [-8.6, -5.6, -2.8, 2.8][j] })),
-];
-const desks = {};
+function buildDesks(ox) {
+  DESK_DEFS = [
+    { id: 'A0', x: -7.0 + ox, z: ROW_A_Z, kind: 'ketua', color: COLORS.ketua },
+    ...TEAM_NAMES.map((n, i) => ({ id: `A${i + 1}`, x: -4.2 + i * 2.8 + ox, z: ROW_A_Z, kind: 'tim', idx: i, color: COLORS.team[i % COLORS.team.length] })),
+    ...Array.from({ length: SPARE }, (_, j) => ({ id: `B${j}`, x: -7.0 + j * 2.8 + ox, z: ROW_B_Z, kind: 'spare', idx: j, color: '#9a938a', gap: [-8.6, -5.6, -2.8, 2.8][j] + ox })),
+  ];
+  desks = {};
+  DESK_DEFS.forEach(buildDesk);
+}
 function drawPlate(d, name, role, css) {
   const np = d.plate;
   np.ctx.fillStyle = '#fbfaf7';
@@ -1246,125 +1343,32 @@ function buildDesk(def) {
   else if (def.kind === 'tim') drawPlate(d, TEAM_NAMES[def.idx], 'Tim', def.color);
   else drawPlate(d, `Meja cadangan ${def.idx + 1}`, 'Freelancer', def.color);
 }
-function palm(x, z, s, lean) {
-  const g = new THREE.Group();
-  g.position.set(x, 0, z);
-  g.rotation.z = lean;
-  const trunk = mesh(new THREE.CylinderGeometry(0.09 * s, 0.15 * s, 2.8 * s, 8), mat('#8a6238', 0.9));
-  trunk.position.y = 1.4 * s;
-  g.add(trunk);
-  const leafM = new THREE.MeshStandardMaterial({ color: '#3f8f4f', roughness: 0.9, side: THREE.DoubleSide });
-  for (let i = 0; i < 6; i++) {
-    const leaf = mesh(new THREE.PlaneGeometry(1.7 * s, 0.45 * s, 4, 1), leafM, { cast: false });
-    const a = (i / 6) * Math.PI * 2;
-    leaf.position.set(Math.cos(a) * 0.75 * s, 2.85 * s, Math.sin(a) * 0.75 * s);
-    leaf.rotation.y = -a + Math.PI / 2;
-    leaf.rotation.z = 0.5;
-    g.add(leaf);
-  }
-  const nut = mesh(new THREE.SphereGeometry(0.12 * s, 10, 8), mat('#6b4a2f', 0.9));
-  nut.position.set(0.15 * s, 2.7 * s, 0);
-  g.add(nut);
-  scene.add(g);
-}
-function buildPantaiShell() {
-  const sand = mesh(new THREE.CircleGeometry(34, 48).rotateX(-Math.PI / 2), mat('#e3cd9c', 1), { cast: false });
-  sand.position.set(0, 0, 0);
-  sand.receiveShadow = true;
-  scene.add(sand);
-  const sea = mesh(new THREE.PlaneGeometry(80, 16).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#2f9ec4', roughness: 0.35 }), { cast: false });
-  sea.position.set(0, 0.03, -17);
-  scene.add(sea);
-  seaMesh = sea;
-  const foam = mesh(new THREE.PlaneGeometry(80, 1.1).rotateX(-Math.PI / 2), mat('#eaf6f8', 0.6), { cast: false });
-  foam.position.set(0, 0.035, -9.4);
-  scene.add(foam);
-  const sun = mesh(new THREE.CircleGeometry(2.2, 32), new THREE.MeshBasicMaterial({ color: '#ffd76b', toneMapped: false }), { cast: false });
-  sun.position.set(-24, 15, -36);
-  scene.add(sun);
-  palm(-9.4, -6.0, 1.15, 0.12);
-  palm(9.4, -6.2, 1.0, -0.14);
-  palm(-9.6, 4.8, 0.85, 0.1);
-  const ball = mesh(new THREE.SphereGeometry(0.28, 16, 12), new THREE.MeshStandardMaterial({ color: '#e15f4e', roughness: 0.6 }));
-  ball.position.set(6.5, 0.28, 3.6);
-  scene.add(ball);
-}
-function buildTikar(def) {
-  const tikar = new THREE.Group();
-  tikar.position.set(def.x, 0, def.z);
-  scene.add(tikar);
-  const boss = def.kind === 'ketua';
-  const mat1 = mesh(box(2.3, 0.05, 1.5, 0.02), mat(boss ? '#c98f4e' : '#d9b96a', 0.9));
-  mat1.position.y = 0.025;
-  tikar.add(mat1);
-  const top = mesh(box(1.15, 0.05, 0.6, 0.02), mat('#a97c50', 0.7));
-  top.position.set(0, 0.32, -0.3);
-  tikar.add(top);
-  for (const s of [-1, 1]) {
-    const leg = mesh(box(0.05, 0.3, 0.5), mat('#8c6a4f', 0.7));
-    leg.position.set(s * 0.5, 0.16, -0.3);
-    tikar.add(leg);
-  }
-  const main = monitor(0.72, 0.45);
-  main.g.position.set(-0.2, 0.62, -0.35);
-  main.g.rotation.x = -0.08;
-  const side = monitor(0.6, 0.38);
-  side.g.position.set(0.45, 0.6, -0.3);
-  side.g.rotation.y = -0.3;
-  tikar.add(main.g, side.g);
-  const kelapa = mesh(new THREE.SphereGeometry(0.11, 12, 10), mat('#6b4a2f', 0.9));
-  kelapa.position.set(0.85, 0.42, 0.15);
-  tikar.add(kelapa);
-  const np = canvasTex(512, 128);
-  const plate = mesh(new THREE.PlaneGeometry(0.5, 0.125), new THREE.MeshStandardMaterial({ map: np.tex, roughness: 0.5 }), { cast: false });
-  plate.position.set(-0.8, 0.3, 0.45);
-  plate.rotation.x = -0.25;
-  const pole = mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.35, 6), mat('#8c6a4f', 0.7));
-  pole.position.set(-0.8, 0.15, 0.45);
-  tikar.add(plate, pole);
-  const lamp = new THREE.PointLight('#ffd9a0', 0, 5, 2);
-  lamp.position.set(0, 1.6, 0.3);
-  tikar.add(lamp);
-  const seat = new THREE.Group();
-  seat.position.set(def.x, 0, def.z + 0.95);
-  seat.rotation.y = Math.PI;
-  scene.add(seat);
-  const pouf = mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.5, 14), mat(boss ? '#8a5a3b' : '#3a6ea5', 0.95));
-  pouf.position.y = 0.25;
-  seat.add(pouf);
-  const d = { ...def, group: tikar, seat, main, side, deskMug: null, lamp, plate: np, data: null, who: null, sig: '', drawnAt: 0, plateSig: '' };
-  desks[def.id] = d;
-  if (def.kind === 'ketua') drawPlate(d, KETUA_NAME, 'Ketua · Pantai', def.color);
-  else if (def.kind === 'tim') drawPlate(d, TEAM_NAMES[def.idx], 'Tim · Pantai', def.color);
-  else drawPlate(d, `Tikar cadangan ${def.idx + 1}`, 'Freelancer', def.color);
-}
-if (IS_PANTAI) buildPantaiShell();
-DESK_DEFS.forEach(IS_PANTAI ? buildTikar : buildDesk);
-
 // ---------------------------------------------------------------- tempat & jalur (koridor z = −2.1 + "jari" ke tiap tempat)
 // Setiap tempat punya spoke: titik pertama di koridor, lalu titik-titik sampai posisi akhir. Rute A→B =
 // mundur lewat spoke A ke koridor → sepanjang koridor → maju lewat spoke B. Bebas tabrakan dengan perabot.
-const PLACES = {};
-for (const d of Object.values(desks)) {
-  const seatPos = V(d.x, d.z + 0.95);
-  const spoke = d.z === ROW_A_Z ? [V(d.x, CORRIDOR_Z)] : [V(d.gap, CORRIDOR_Z), V(d.gap, 0.95), V(d.x, 0.95)];
-  PLACES[`desk:${d.id}`] = { kind: 'desk', desk: d, pos: seatPos, heading: Math.PI, spoke };
+function buildPlaces(ox) {
+  PLACES = {};
+  for (const d of Object.values(desks)) {
+    const seatPos = V(d.x, d.z + 0.95);
+    const spoke = d.z === ROW_A_Z ? [V(d.x, CORRIDOR_Z)] : [V(d.gap, CORRIDOR_Z), V(d.gap, 0.95), V(d.x, 0.95)];
+    PLACES[`desk:${d.id}`] = { kind: 'desk', desk: d, pos: seatPos, heading: Math.PI, spoke };
+  }
+  SPOTS = {
+    tv: { pos: V(4.3 + ox, 1.25), heading: Math.PI, spoke: [V(3.2 + ox, CORRIDOR_Z), V(3.2 + ox, 1.05)], sit: 'sofa' },
+    ps: { pos: V(5.5 + ox, 1.25), heading: Math.PI, spoke: [V(7.0 + ox, CORRIDOR_Z), V(6.9 + ox, 1.05)], sit: 'sofa' },
+    coffee: { pos: V(7.7 + ox, -5.55), heading: Math.PI, spoke: [V(7.2 + ox, CORRIDOR_Z), V(7.4 + ox, -5.0)] },
+    water: { pos: V(8.75 + ox, -5.45), heading: Math.PI / 2, spoke: [V(7.2 + ox, CORRIDOR_Z), V(7.4 + ox, -5.0)] },
+    window: { pos: V(3.5 + ox, -6.15), heading: Math.PI, spoke: [V(6.3 + ox, CORRIDOR_Z), V(6.3 + ox, -5.6)] },
+    guitar: { pos: V(-1.4 + ox, 2.6), heading: 0.35, spoke: [V(2.8 + ox, CORRIDOR_Z), V(2.8 + ox, 1.7)] },
+    meet1: { pos: V(MEET.x + 0.585, MEET.z - 1.217), heading: -0.448, spoke: [V(-2.8 + ox, CORRIDOR_Z), V(-2.8 + ox, 1.2)], sit: 'chair' },
+    meet2: { pos: V(MEET.x - 1.346, MEET.z + 0.103), heading: 1.648, spoke: [V(-8.6 + ox, CORRIDOR_Z), V(-8.6 + ox, 1.6), V(-7.6 + ox, 3.8)], sit: 'chair' },
+    meet3: { pos: V(MEET.x + 0.762, MEET.z + 1.114), heading: -2.54, spoke: [V(-2.8 + ox, CORRIDOR_Z), V(-2.8 + ox, 1.2), V(-3.3 + ox, 4.6)], sit: 'chair' },
+    bookshelf: { pos: V(-8.9 + ox, 3.8), heading: -Math.PI / 2, spoke: [V(-8.6 + ox, CORRIDOR_Z), V(-8.6 + ox, 2.4)] },
+  };
+  for (const [id, s] of Object.entries(SPOTS)) PLACES[`spot:${id}`] = { kind: 'spot', spot: id, ...s };
+  PLACES.door = { kind: 'door', pos: V(ROOM.x0 - 0.9, CORRIDOR_Z), heading: -Math.PI / 2, spoke: [V(ROOM.x0 + 0.6, CORRIDOR_Z)] };
+  SPOT_IDS = Object.keys(SPOTS);
 }
-const SPOTS = {
-  tv: { pos: V(4.3, 1.25), heading: Math.PI, spoke: [V(3.2, CORRIDOR_Z), V(3.2, 1.05)], sit: 'sofa' },
-  ps: { pos: V(5.5, 1.25), heading: Math.PI, spoke: [V(7.0, CORRIDOR_Z), V(6.9, 1.05)], sit: 'sofa' },
-  coffee: { pos: V(7.7, -5.55), heading: Math.PI, spoke: [V(7.2, CORRIDOR_Z), V(7.4, -5.0)] },
-  water: { pos: V(8.75, -5.45), heading: Math.PI / 2, spoke: [V(7.2, CORRIDOR_Z), V(7.4, -5.0)] },
-  window: { pos: V(3.5, -6.15), heading: Math.PI, spoke: [V(6.3, CORRIDOR_Z), V(6.3, -5.6)] },
-  guitar: { pos: V(-1.4, 2.6), heading: 0.35, spoke: [V(2.8, CORRIDOR_Z), V(2.8, 1.7)] },
-  meet1: { pos: V(MEET.x + 0.585, MEET.z - 1.217), heading: -0.448, spoke: [V(-2.8, CORRIDOR_Z), V(-2.8, 1.2)], sit: 'chair' },
-  meet2: { pos: V(MEET.x - 1.346, MEET.z + 0.103), heading: 1.648, spoke: [V(-8.6, CORRIDOR_Z), V(-8.6, 1.6), V(-7.6, 3.8)], sit: 'chair' },
-  meet3: { pos: V(MEET.x + 0.762, MEET.z + 1.114), heading: -2.54, spoke: [V(-2.8, CORRIDOR_Z), V(-2.8, 1.2), V(-3.3, 4.6)], sit: 'chair' },
-  bookshelf: { pos: V(-8.9, 3.8), heading: -Math.PI / 2, spoke: [V(-8.6, CORRIDOR_Z), V(-8.6, 2.4)] },
-};
-for (const [id, s] of Object.entries(SPOTS)) PLACES[`spot:${id}`] = { kind: 'spot', spot: id, ...s };
-PLACES.door = { kind: 'door', pos: V(ROOM.x0 - 0.9, CORRIDOR_Z), heading: -Math.PI / 2, spoke: [V(ROOM.x0 + 0.6, CORRIDOR_Z)] };
-const SPOT_IDS = Object.keys(SPOTS);
 
 const QUIPS = {
   tv: ['Filmnya lagi seru nih 🍿', 'Eh, aktornya siapa ya?', 'Jangan di-skip dulu!', 'Episode ini bagus banget'],
@@ -1423,7 +1427,6 @@ const CHAT = [
 ];
 
 // ---------------------------------------------------------------- aktor (Ketua, tim, freelancer)
-const actors = new Map();
 const pickables = [];
 const tmpV = new THREE.Vector3();
 function guitarMesh() {
@@ -1494,14 +1497,20 @@ function removeActor(a) {
       if (i >= 0) pickables.splice(i, 1);
     }
   });
-  actors.delete(a.key);
+  (roomOf(a)?.actors || actors).delete(a.key);
 }
 function say(a, text, ms = 4200, cls = '') {
   a.bubble = { text, until: performance.now() + ms, cls };
 }
-// letakkan langsung (muat pertama / gerak dikurangi)
+// letakkan langsung (muat pertama / gerak dikurangi); placeId namespaced per room
+function placesOf(a) {
+  return roomOf(a)?.places || PLACES;
+}
 function placeAt(a, placeId) {
-  const pl = PLACES[placeId];
+  const room = roomOf(a);
+  const raw = rawPid(placeId);
+  const pl = (room?.places || PLACES)[raw];
+  if (!pl) return;
   if (a.seated) {
     scene.attach(a.p.root);
     a.seated = false;
@@ -1509,23 +1518,27 @@ function placeAt(a, placeId) {
   a.p.root.position.copy(pl.pos);
   a.p.root.rotation.set(0, pl.heading, 0);
   a.heading = pl.heading;
-  a.goal = placeId;
+  a.goal = room ? nsPid(room, raw) : raw;
   a.path = [];
   a.walking = false;
   arrive(a, true);
 }
 function goTo(a, placeId) {
-  if (a.goal === placeId) return;
+  const room = roomOf(a);
+  const raw = rawPid(placeId);
+  if (goalRaw(a) === raw) return;
   if (REDUCED || a.goal === null) {
-    placeAt(a, placeId);
+    placeAt(a, raw);
     return;
   }
-  const pl = PLACES[placeId];
+  const PM = room?.places || PLACES;
+  const pl = PM[raw];
+  if (!pl) return;
   let esc0;
   if (a.walking) esc0 = a.path[a.i]?.esc ?? [];
   else {
-    const cur = PLACES[a.goal];
-    esc0 = [...cur.spoke].reverse();
+    const cur = PM[goalRaw(a)];
+    esc0 = cur ? [...cur.spoke].reverse() : [];
   }
   if (a.seated) {
     scene.attach(a.p.root);
@@ -1539,14 +1552,15 @@ function goTo(a, placeId) {
   path.push({ p: pl.pos, esc: [...pl.spoke].reverse() });
   a.path = path;
   a.i = 0;
-  a.goal = placeId;
+  a.goal = room ? nsPid(room, raw) : raw;
   a.walking = true;
   a.holding = null;
 }
 function arrive(a, instant = false) {
   a.walking = false;
   a.arrivedAt = performance.now();
-  const pl = PLACES[a.goal];
+  const pl = placesOf(a)[goalRaw(a)];
+  if (!pl) return;
   if (pl.kind === 'desk') {
     pl.desk.seat.rotation.y = Math.PI;
     pl.desk.seat.attach(a.p.root);
@@ -1623,23 +1637,24 @@ function workMode(a) {
   return 'type';
 }
 
-// Ketua + 4 anggota tim selalu ada
-const KETUA = makeActor({ key: 'ketua', kind: 'ketua', name: KETUA_NAME, role: 'Ketua', color: COLORS.ketua, look: LOOKS.ketua, desk: 'A0' });
-const TEAM = TEAM_NAMES.map((n, i) => makeActor({ key: `tim-${i}`, kind: 'tim', idx: i, name: n, role: 'Tim', color: COLORS.team[i % COLORS.team.length], look: LOOKS.team[i], desk: `A${i + 1}` }));
-
+// Ketua + 4 anggota tim selalu ada (dibangun per ruangan via buildRoomInstance di bawah)
 // ---------------------------------------------------------------- lounge: tempat unik per aktor + obrolan
-const LOUNGE = { chatAt: performance.now() + 4000 };
 function claimedSpots(except) {
   const s = new Set();
-  for (const a of actors.values()) if (a !== except && a.goal?.startsWith('spot:')) s.add(a.goal.slice(5));
+  const room = roomOf(except);
+  const AM = room?.actors || actors;
+  for (const a of AM.values()) if (a !== except && goalRaw(a).startsWith('spot:')) s.add(goalRaw(a).slice(5));
   return s;
 }
 function lounge(a, now, instant) {
-  const onSpot = a.goal?.startsWith('spot:');
+  const room = roomOf(a);
+  const IDS = room?.spotIds || SPOT_IDS;
+  const gr = goalRaw(a);
+  const onSpot = gr.startsWith('spot:');
   if (onSpot && now < a.spotUntil) return;
   const taken = claimedSpots(a);
-  let options = SPOT_IDS.filter((id) => !taken.has(id) && `spot:${id}` !== a.goal);
-  if (!options.length) options = SPOT_IDS.filter((id) => !taken.has(id));
+  let options = IDS.filter((id) => !taken.has(id) && `spot:${id}` !== gr);
+  if (!options.length) options = IDS.filter((id) => !taken.has(id));
   if (!options.length) return;
   const id = pickOne(options);
   a.spotUntil = now + (REDUCED ? 90000 : 38000 + Math.random() * 34000);
@@ -1649,15 +1664,69 @@ function lounge(a, now, instant) {
 function chatter(now) {
   if (now < LOUNGE.chatAt) return;
   LOUNGE.chatAt = now + 7000 + Math.random() * 4500;
-  const avail = [...actors.values()].filter((a) => !a.work && !a.walking && a.goal?.startsWith('spot:') && now > a.bubble.until);
+  const avail = [...actors.values()].filter((a) => !a.work && !a.walking && goalRaw(a).startsWith('spot:') && now > a.bubble.until);
   if (avail.length < 2) return;
   const sp = pickOne(avail);
   const near = avail.filter((b) => b !== sp).sort((b1, b2) => b1.p.root.position.distanceTo(sp.p.root.position) - b2.p.root.position.distanceTo(sp.p.root.position));
   const ls = Math.random() < 0.7 ? near[0] : pickOne(near);
   const [q, r] = pickOne(CHAT);
   say(sp, q.replace('{to}', ls.name), 4800);
-  setTimeout(() => { if (!ls.work && ls.goal?.startsWith('spot:')) say(ls, r, 4200); }, 2300);
+  setTimeout(() => { if (!ls.work && goalRaw(ls).startsWith('spot:')) say(ls, r, 4200); }, 2300);
 }
+
+// ---------------------------------------------------------------- satu ruangan = satu project (T5)
+// Bungkus pembangunan ruangan: isi konteks aktif lalu jepret ke objek Room.
+// Key aktor namespaced `<roomId>:…` agar unik antar-ruangan (kontrak K2).
+function buildRoomInstance(roomId, title, ox) {
+  ROOM = { x0: -10 + ox, x1: 10 + ox, z0: -7, z1: 6, h: 5.2 };
+  DESK_DEFS = [];
+  desks = {};
+  PLACES = {};
+  SPOTS = {};
+  SPOT_IDS = [];
+  actors = new Map();
+  LOUNGE = { chatAt: performance.now() + 4000 };
+  LOUNGE_PADS = [];
+  windows = [];
+  todoBoard = null;
+  histBoard = null;
+  buildRoomShell(roomId);
+  door = buildDoor();
+  buildRoomWindows(ox);
+  buildFurniture(ox);
+  buildBoards(ox, roomId, title);
+  buildDesks(ox);
+  buildPlaces(ox);
+  // Ketua + 4 anggota tim selalu ada
+  KETUA = makeActor({ key: `${roomId}:ketua`, kind: 'ketua', name: KETUA_NAME, role: 'Ketua', color: COLORS.ketua, look: LOOKS.ketua, desk: 'A0' });
+  TEAM = TEAM_NAMES.map((n, i) => makeActor({ key: `${roomId}:tim-${i}`, kind: 'tim', idx: i, name: n, role: 'Tim', color: COLORS.team[i % COLORS.team.length], look: LOOKS.team[i], desk: `A${i + 1}` }));
+  const room = {
+    id: roomId, title, ox,
+    desks, places: PLACES, actors, ketua: KETUA, team: TEAM, door, loungeAt: LOUNGE, pads: LOUNGE_PADS,
+    bounds: ROOM, meet: MEET, spots: SPOTS, spotIds: SPOT_IDS, deskDefs: DESK_DEFS, windows, todoBoard, histBoard,
+    state: null, firstLoad: true, prev: new Map(), prevFeed: new Set(), boardSig: '', fresh: new Set(),
+  };
+  for (const a of actors.values()) a.room = room;
+  KETUA.room = room;
+  for (const t of TEAM) t.room = room;
+  ROOMS.push(room);
+  return room;
+}
+// T6: N ruangan berjajar (ox = idx*22); N=1 identik tampilan lama.
+PROJECTS.forEach((p, i) => buildRoomInstance(p.id, p.title, i * ROOM_W));
+FOCUS = ROOMS.find((r) => r.id === FOCUS_Q) || ROOMS.find((r) => r.id === CFG.current) || ROOMS[0];
+useRoom(FOCUS);
+(function fitCamera() {
+  const N = ROOMS.length;
+  const cx = ((N - 1) * ROOM_W) / 2;
+  if (N > 1) {
+    HOME.pos.set(cx - 1.2, 12.5 + (N - 1) * 4.5, 16.8 + (N - 1) * 11);
+    HOME.target.set(cx - 1.0, 0.6, -1.2);
+    controls.maxDistance = 34 + (N - 1) * 20;
+  }
+  camera.position.copy(HOME.pos);
+  controls.target.copy(HOME.target);
+})();
 
 // ---------------------------------------------------------------- layar monitor & papan (data nyata)
 function drawIdleScreen(scr, title, sub, css, dim) {
@@ -1929,29 +1998,30 @@ function drawHistBoard(runs) {
   tex.needsUpdate = true;
 }
 
-// ---------------------------------------------------------------- data nyata → karakter
-let S = null;
-let firstLoad = true;
-let prevFeedKeys = new Set();
-let boardSig = '';
-const prev = new Map(); // key → {state, runId}
-
-async function poll() {
+// ---------------------------------------------------------------- data nyata → karakter (T6: state per room)
+let S = null; // = FOCUS.state (kompatibel lama)
+async function pollRoom(room) {
   try {
-    const r = await fetch(API, { cache: 'no-store' });
+    const r = await fetch(`${API_BASE}?project=${encodeURIComponent(room.id)}`, { cache: 'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
     if (!d || d.app !== 'kantor-agent') throw new Error('respons tidak dikenal');
-    apply(d);
+    apply(d, room);
   } catch {
-    $('liveDot').classList.add('off');
-    $('liveTxt').textContent = 'Terputus';
+    if (room === FOCUS) {
+      $('liveDot').classList.add('off');
+      $('liveTxt').textContent = 'Terputus';
+    }
   } finally {
-    setTimeout(poll, document.hidden ? POLL_MS * 4 : POLL_MS);
+    setTimeout(() => pollRoom(room), document.hidden ? POLL_MS * 4 : POLL_MS);
   }
+}
+function poll() {
+  for (const room of ROOMS) pollRoom(room);
 }
 let reloading = false;
 function maybeReload(d) {
+  if (PROJECTS.length > 1) return false;
   if (reloading || typeof d.names !== 'string' || (d.names === NAMES_SIG && (typeof CFG.title !== 'string' || d.project === CFG.title))) return false;
   let last = 0;
   try { last = Number(sessionStorage.getItem('kantor.reloadAt') || 0); } catch { /* penyimpanan tidak tersedia */ }
@@ -1968,25 +2038,29 @@ function actionText(a) {
   if (!e || Date.now() - new Date(e.t).getTime() > 25000) return '';
   return clip(e.text, 48);
 }
-function apply(d) {
+function apply(d, room) {
+  room = room || FOCUS || ROOMS[0];
+  if (!room) return;
   if (maybeReload(d)) return;
-  S = d;
-  $('liveDot').classList.remove('off');
-  $('liveTxt').textContent = innerWidth <= 820 ? `Live · ${hhmm(d.now)}` : `Live · ${hhmmss(d.now)}`;
+  useRoom(room);
+  room.state = d;
+  const firstLoad = room.firstLoad;
+  const prev = room.prev;
   const now = performance.now();
   const live = !firstLoad;
+  const R0 = room;
 
   // Ketua
   KETUA.data = d.ketua;
   const kWork = d.ketua.state === 'bekerja' || d.ketua.state === 'selesai';
-  const kPrev = prev.get('ketua');
+  const kPrev = prev.get(KETUA.key);
   KETUA.work = kWork;
   if (kWork) {
     if (firstLoad) placeAt(KETUA, 'desk:A0');
     else goTo(KETUA, 'desk:A0');
-  } else if (!KETUA.goal?.startsWith('spot:') || firstLoad) lounge(KETUA, now, firstLoad);
+  } else if (!goalRaw(KETUA).startsWith('spot:') || firstLoad) lounge(KETUA, now, firstLoad);
   if (live && kPrev && kPrev.state === 'bekerja' && d.ketua.state === 'selesai') say(KETUA, 'Beres, menunggu instruksi berikutnya', 3800, 'hi');
-  prev.set('ketua', { state: d.ketua.state });
+  prev.set(KETUA.key, { state: d.ketua.state });
 
   // tim
   d.team.forEach((m, i) => {
@@ -2005,7 +2079,7 @@ function apply(d) {
       }
     } else {
       if (live && p && p.state === 'bekerja') say(a, 'Beres!', 3600, 'hi');
-      if (!a.goal?.startsWith('spot:') || firstLoad) lounge(a, now, firstLoad);
+      if (!goalRaw(a).startsWith('spot:') || firstLoad) lounge(a, now, firstLoad);
     }
     prev.set(a.key, { state: m.state, runId: m.run?.id ?? null });
   });
@@ -2014,11 +2088,13 @@ function apply(d) {
   const seen = new Set();
   for (const f of d.freelancers) {
     if (f.desk === null || f.desk >= SPARE) continue;
-    seen.add(f.key);
-    let a = actors.get(f.key);
+    const ak = `${R0.id}:${f.key}`; // key aktor `<roomId>:fl-<runid>`
+    seen.add(ak);
+    let a = actors.get(ak);
     if (!a) {
       if (f.state !== 'bekerja') continue;
-      a = makeActor({ key: f.key, kind: 'freelancer', name: f.name, role: 'Freelancer', color: f.color, look: freelancerLook(f.name, f.color), desk: `B${f.desk}` });
+      a = makeActor({ key: ak, kind: 'freelancer', name: f.name, role: 'Freelancer', color: f.color, look: freelancerLook(f.name, f.color), desk: `B${f.desk}` });
+      a.room = room;
       if (firstLoad) placeAt(a, `desk:B${f.desk}`);
       else {
         placeAt(a, 'door');
@@ -2029,20 +2105,20 @@ function apply(d) {
     }
     a.data = f;
     a.desk = `B${f.desk}`;
-    const p = prev.get(f.key);
+    const p = prev.get(ak);
     if (f.state === 'bekerja') {
       a.work = true;
       a.leaving = false;
       goTo(a, `desk:${a.desk}`);
       if (live && p && p.runId !== f.run?.id) say(a, 'Siap, saya kerjakan!', 3600, 'hi');
-      if (live && !p) setTimeout(() => { if (actors.has(f.key)) say(a, 'Siap, saya kerjakan!', 3600, 'hi'); }, 3200);
+      if (live && !p) setTimeout(() => { if (actors.has(ak)) say(a, 'Siap, saya kerjakan!', 3600, 'hi'); }, 3200);
     } else if (!a.leaving) {
       a.work = false;
       a.leaving = true;
       if (live) say(a, 'Beres! Pamit dulu ya 👋', 3800, 'hi');
       goTo(a, 'door');
     }
-    prev.set(f.key, { state: f.state, runId: f.run?.id ?? null });
+    prev.set(ak, { state: f.state, runId: f.run?.id ?? null });
   }
   for (const a of [...actors.values()]) {
     if (a.kind !== 'freelancer' || seen.has(a.key) || a.leaving) continue;
@@ -2076,22 +2152,29 @@ function apply(d) {
   const keys = new Set(d.feed.map((e) => `${e.t}|${e.who}|${e.text}`));
   if (live) {
     for (const e of d.feed) {
-      if (prevFeedKeys.has(`${e.t}|${e.who}|${e.text}`)) continue;
-      const a = actors.get(e.who);
+      if (room.prevFeed.has(`${e.t}|${e.who}|${e.text}`)) continue;
+      const a = actors.get(e.who) ?? actors.get(`${R0.id}:${e.who}`); // server kirim key mentah
       if (a) a.p.nod = 0.16;
     }
   }
-  const fresh = live ? new Set([...keys].filter((k) => !prevFeedKeys.has(k))) : new Set();
-  prevFeedKeys = keys;
+  const fresh = live ? new Set([...keys].filter((k) => !room.prevFeed.has(k))) : new Set();
+  room.prevFeed = keys;
+  room.fresh = fresh;
 
   const sig = JSON.stringify([d.ketua.todos, (d.runs || []).map((r) => [r.id, r.status, r.label]), localDay(new Date().toISOString())]);
-  if (sig !== boardSig) {
-    boardSig = sig;
+  if (sig !== room.boardSig) {
+    room.boardSig = sig;
     drawTodoBoard(d.ketua);
     drawHistBoard(d.runs);
   }
-  renderUi(d, fresh);
-  firstLoad = false;
+  room.firstLoad = false;
+  if (room === FOCUS) {
+    S = d;
+    $('liveDot').classList.remove('off');
+    $('liveTxt').textContent = innerWidth <= 820 ? `Live · ${hhmm(d.now)}` : `Live · ${hhmmss(d.now)}`;
+    renderUi(d, fresh);
+  }
+  useRoom(FOCUS);
 }
 
 // ---------------------------------------------------------------- UI HTML
@@ -2227,8 +2310,20 @@ addEventListener('keydown', (e) => {
 });
 let tween = null;
 function focusOn(key) {
-  const a = actors.get(key);
+  const rk = String(key || '');
+  let a = null;
+  let rm = null;
+  for (const r of ROOMS) {
+    a = r.actors.get(rk) ?? r.actors.get(`${r.id}:${rk}`) ?? r.actors.get(rawPid(rk));
+    if (a) {
+      rm = r;
+      break;
+    }
+  }
   if (!a) return;
+  if (rm && rm !== FOCUS && FOCUS) {
+    // tetap sorot aktor lintas ruangan tanpa memindah panel
+  }
   a.p.head.getWorldPosition(tmpV);
   const target = tmpV.clone().add(new THREE.Vector3(0, -0.2, 0));
   const pos = target.clone().add(new THREE.Vector3(2.2, 2.6, 4.4));
@@ -2255,16 +2350,20 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
   const hit = pick(e);
   if (hit?.userData.key) focusOn(hit.userData.key);
+  else if (hit?.userData.roomId) setFocus(hit.userData.roomId);
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
   if (e.pointerType !== 'mouse') return;
-  renderer.domElement.style.cursor = pick(e)?.userData.key ? 'pointer' : '';
+  const h = pick(e);
+  renderer.domElement.style.cursor = h?.userData.key || h?.userData.roomId ? 'pointer' : '';
 });
 function pick(e) {
   if (!HAS_GL) return null;
   pointer.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   ray.setFromCamera(pointer, camera);
-  return ray.intersectObjects(pickables, false)[0]?.object || null;
+  const h1 = ray.intersectObjects(pickables, false)[0]?.object;
+  if (h1) return h1;
+  return ray.intersectObjects(roomHit, false)[0]?.object || null;
 }
 function onResize() {
   camera.aspect = innerWidth / innerHeight;
@@ -2290,7 +2389,8 @@ function updateDaylight() {
   sun.intensity = night ? 0.25 : 2.3;
   hemi.intensity = night ? 0.45 : 1.05;
   scene.background.set(night ? '#d9d3ca' : '#e9e3da');
-  for (const d of Object.values(desks)) d.lamp.intensity = night ? 3 : 0;
+  for (const r of ROOMS) for (const d of Object.values(r.desks)) d.lamp.intensity = night ? 3 : 0;
+  if (!ROOMS.length) for (const d of Object.values(desks)) d.lamp.intensity = night ? 3 : 0;
 }
 
 // ---------------------------------------------------------------- loop animasi
@@ -2312,8 +2412,8 @@ function updateActor(a, dt, t, now) {
       a.phase += dt * 8;
     } else if (a.i < a.path.length - 1) a.i++;
     else arrive(a);
-  } else if (!a.seated && PLACES[a.goal]) {
-    a.heading = turnTo(a.heading, PLACES[a.goal].heading, dt * 4);
+  } else if (!a.seated && placesOf(a)[goalRaw(a)]) {
+    a.heading = turnTo(a.heading, placesOf(a)[goalRaw(a)].heading, dt * 4);
   }
   if (a.gone) return;
   const tt = REDUCED ? 0 : t;
@@ -2324,10 +2424,10 @@ function updateActor(a, dt, t, now) {
     a.p.spine.position.y = 0.06 + Math.sin(tt * 1.6 + a.seed) * 0.004;
   } else {
     root.rotation.y = a.heading;
-    const pl = PLACES[a.goal];
+    const pl = placesOf(a)[goalRaw(a)];
     applyPose(a.p, a.walking ? walkPose(a) : spotPose(a, pl?.spot, tt), dt);
   }
-  const spot = !a.walking && PLACES[a.goal]?.spot;
+  const spot = !a.walking && placesOf(a)[goalRaw(a)]?.spot;
   a.guitar.visible = spot === 'guitar';
   a.pad.visible = spot === 'ps';
   a.book.visible = spot === 'bookshelf';
@@ -2335,7 +2435,8 @@ function updateActor(a, dt, t, now) {
   // label & gelembung
   a.p.head.getWorldPosition(tmpV);
   a.label.position.set(tmpV.x, tmpV.y + 0.42, tmpV.z);
-  const outside = tmpV.x < ROOM.x0 - 0.05;
+  const bx0 = roomOf(a)?.bounds?.x0 ?? ROOM.x0;
+  const outside = tmpV.x < bx0 - 0.05;
   a.el.classList.toggle('out', outside);
   let text = '';
   let cls = '';
@@ -2363,31 +2464,35 @@ function frame() {
     drawClock();
     updateDaylight();
   }
-  for (const a of [...actors.values()]) {
-    updateActor(a, dt, t, now);
-    if (a.gone && a.kind === 'freelancer') removeActor(a);
-  }
-  for (const d of Object.values(desks)) updateDeskScreens(d, now);
-  if (!REDUCED) chatter(now);
-  if (seaMesh && !REDUCED) seaMesh.position.y = 0.03 + Math.sin(t * 0.7) * 0.035;
-  // pintu terbuka saat ada yang dekat
-  let near = false;
-  for (const a of actors.values()) {
-    const p = a.p.root.getWorldPosition(tmpV);
-    if (Math.abs(p.z - CORRIDOR_Z) < 1 && p.x < ROOM.x0 + 1.4 && p.x > ROOM.x0 - 1.4) near = true;
-  }
-  door.open = REDUCED ? (near ? 1 : 0) : THREE.MathUtils.lerp(door.open, near ? 1 : 0, Math.min(1, dt * 5));
-  door.hinge.rotation.y = door.open * 1.35; // berayun ke dalam ruangan
-  // TV jadi game saat ada yang main PS
-  const player = [...actors.values()].find((x) => !x.walking && x.goal === 'spot:ps');
-  LOUNGE_PADS[1].visible = !player;
-  if (player && !REDUCED) {
-    if (now - gameAt > 150) {
-      drawGame(t, player.name);
-      gameAt = now;
-      tvMode = 'game';
+  for (const room of ROOMS) {
+    useRoom(room);
+    for (const a of [...actors.values()]) {
+      updateActor(a, dt, t, now);
+      if (a.gone && a.kind === 'freelancer') removeActor(a);
     }
-  } else if (tvMode === 'game') {
+    for (const d of Object.values(desks)) updateDeskScreens(d, now);
+    if (!REDUCED) chatter(now);
+    // pintu terbuka saat ada yang dekat
+    let near = false;
+    for (const a of actors.values()) {
+      const p = a.p.root.getWorldPosition(tmpV);
+      if (Math.abs(p.z - CORRIDOR_Z) < 1 && p.x < ROOM.x0 + 1.4 && p.x > ROOM.x0 - 1.4) near = true;
+    }
+    door.open = REDUCED ? (near ? 1 : 0) : THREE.MathUtils.lerp(door.open, near ? 1 : 0, Math.min(1, dt * 5));
+    door.hinge.rotation.y = door.open * 1.35; // berayun ke dalam ruangan
+    // TV jadi game saat ada yang main PS (tekstur TV global, ikut room pertama yang main)
+    const player = [...actors.values()].find((x) => !x.walking && goalRaw(x) === 'spot:ps');
+    if (LOUNGE_PADS[1]) LOUNGE_PADS[1].visible = !player;
+    if (player && !REDUCED && tvMode !== 'game') {
+      if (now - gameAt > 150) {
+        drawGame(t, player.name);
+        gameAt = now;
+        tvMode = 'game';
+      }
+    }
+  }
+  useRoom(FOCUS);
+  if (tvMode === 'game' && !ROOMS.some((r) => [...r.actors.values()].some((x) => !x.walking && goalRaw(x) === 'spot:ps'))) {
     drawTv();
     tvMode = 'tv';
   }
@@ -2398,7 +2503,9 @@ function frame() {
     controls.target.lerpVectors(tween.t0, tween.t1, e);
     if (tween.t >= 1) tween = null;
   }
-  controls.target.x = THREE.MathUtils.clamp(controls.target.x, ROOM.x0 + 1, ROOM.x1 - 1);
+  const X0 = ROOMS.length ? ROOMS[0].bounds.x0 + 1 : ROOM.x0 + 1;
+  const X1 = ROOMS.length ? ROOMS[ROOMS.length - 1].bounds.x1 - 1 : ROOM.x1 - 1;
+  controls.target.x = THREE.MathUtils.clamp(controls.target.x, X0, Math.max(X0, X1));
   controls.target.z = THREE.MathUtils.clamp(controls.target.z, ROOM.z0 + 1, ROOM.z1 - 1);
   controls.target.y = THREE.MathUtils.clamp(controls.target.y, 0.3, 3.5);
   controls.update();
@@ -2418,7 +2525,11 @@ if (location.hash === '#debug') {
   };
 }
 // awal: semua santai sampai data pertama datang (tanpa data = tanpa aktivitas palsu)
-for (const a of [KETUA, ...TEAM]) lounge(a, performance.now(), true);
+for (const room of ROOMS) {
+  useRoom(room);
+  for (const a of [KETUA, ...TEAM]) lounge(a, performance.now(), true);
+}
+useRoom(FOCUS);
 drawTodoBoard(null);
 drawHistBoard([]);
 updateDaylight();

@@ -9,11 +9,10 @@ export const SECURITY_HEADERS = {
 };
 
 // Konfigurasi halaman (window.KANTOR): nama, judul & daftar project — status diambil lewat /kerja/api/state.
-// extra: { projects: [{id, title}], current, layout } — kosong bila server satu project (kompatibel lama).
+// extra: { projects: [{id, title}], current } — kosong bila server satu project (kompatibel lama).
 export function pageConfig(cfg, extra = {}) {
   return {
     title: cfg.title, ketua: cfg.ketua, team: cfg.team, colors: cfg.colors, spare_desks: cfg.spare_desks,
-    layout: typeof extra.layout === 'string' ? extra.layout : cfg.layout,
     projects: Array.isArray(extra.projects) ? extra.projects : [],
     current: typeof extra.current === 'string' ? extra.current : '',
   };

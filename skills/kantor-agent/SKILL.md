@@ -34,10 +34,10 @@ Argumen user: $ARGUMENTS
   selesai/dihentikan/limit → "Beres!" lalu kembali santai. Penugasan dihitung ulang dari data yang sama sehingga stabil.
 - **Freelancer** = subagent saat keempat anggota tim sibuk: masuk lewat pintu, duduk di meja cadangan (maks 4 meja,
   sisanya kartu "+N"), pulang lewat pintu setelah selesai.
-- Nama/judul/port/layout bisa ditimpa lewat `<project>/.opencode/kantor-agent.json` (opsional, lihat README):
-  `{"title": "…", "port": 8788, "layout": "kantor"|"pantai", "names": {"ketua": "…", "team": ["…","…","…","…"], "freelancers": ["…"]}, "autostart": false}`.
-- Multi-project (`--project` diulang): Bos berkunjung lewat dropdown "Bos mengunjungi" di bar atas — seluruh
-  isi kantor mengikuti project terpilih. Tombol Pantai/Kantor mengganti suasana per project (override sesi).
+- Nama/judul/port bisa ditimpa lewat `<project>/.opencode/kantor-agent.json` (opsional, lihat README):
+  `{"title": "…", "port": 8788, "names": {"ketua": "…", "team": ["…","…","…","…"], "freelancers": ["…"]}, "autostart": false}`.
+- Multi-project (`--project` diulang): tiap project = satu ruangan dengan Ketua + tim sendiri;
+  klik ruangan/dropdown/`?room=` untuk fokus, panel (kartu, feed, riwayat, tugas) mengikuti ruangan fokus.
 
 ## Aturan
 - Read-only terhadap project dan transkrip; jangan membuat atau mengubah file di project kecuali user meminta

@@ -99,18 +99,17 @@ Kantor Agent berjalan (node) untuk project: toko-kue
 Buka URL itu di browser. Perintah lain: `… status`, `… stop`, `… restart`, `… url`, `… tunnel` (URL publik),
 `… tunnel-stop`, `… detect`.
 
-## Multi-project: Bos keliling
+## Multi-project: satu kantor, banyak ruangan
 Satu server bisa memantau beberapa project sekaligus — `--project` boleh diulang:
 ```bash
 bash <skill-dir>/runtime/bin/kantor.sh start --project ~/toko-kue --project ~/bengkel-motor
 ```
-Di halaman ada dropdown **"Bos mengunjungi"**: pilih project, seluruh kantor (tim, aktivitas, riwayat) ganti ke
-project itu. Tiap project memakai config `.opencode/kantor-agent.json`-nya masing-masing.
+Tiap project = satu ruangan dengan Ketua + timnya sendiri. Tiap project memakai config
+`.opencode/kantor-agent.json`-nya masing-masing.
 
-## Layout pantai
-Tiap project bisa tampil sebagai pantai sederhana, bukan kantor: tombol **Pantai/Kantor** di bar atas (override
-sesi via `?layout=`), atau permanen lewat config: `{"layout": "pantai"}` di `.opencode/kantor-agent.json`.
-Meja jadi tikar + laptop + kelapa, sofa jadi beanbag — logika aktor, feed, dan panel tetap sama.
+## Ruangan
+Satu kantor besar berisi N ruangan — tiap project = satu ruangan dengan Ketua + timnya sendiri.
+Klik ruangan atau dropdown untuk fokus (+ `?room=` di URL); kartu, feed, riwayat, dan tugas mengikuti ruangan fokus.
 
 ## Cara kerja
 ```text
@@ -125,7 +124,7 @@ skills/kantor-agent/runtime/   (dijalankan langsung dari folder skill — tidak 
   bin/kantor.sh ── pilih runtime & port bebas ──┬─ Node:  bin/serve-node.mjs + lib/node/*.mjs
                                                  └─ PHP:   php -S … public/index.php + lib/php/*.php
          │  cache, PID, log → ~/.cache/kantor-agent/<slug-project>/
-         ├── GET /kerja[?project=id&layout=pantai] halaman (views/page.html)
+         ├── GET /kerja[?project=id] halaman (views/page.html)
          ├── GET /kerja/api/projects daftar project (multi)
          ├── GET /kerja/api/state[?project=id] JSON status, dipolling tiap 3 detik
          ├── GET /kerja/api/ping   identitas server (untuk start/stop idempoten)

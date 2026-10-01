@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Kantor Agent — server PHP (≥ 8.1, + mbstring), dijalankan lewat bin/kantor.sh:
  *   KANTOR_PROJECT=<project> KANTOR_STORAGE=<cache> php -S 127.0.0.1:8788 -t public public/index.php
  *   (multi: KANTOR_PROJECTS="<p1>\n<p2>")
- *   /kerja[?project=id&layout=pantai]  /kerja/api/projects  /kerja/api/state[?project=id]  /kerja/api/ping  /kerja/assets/<file.js>
+   *   /kerja[?project=id]  /kerja/api/projects  /kerja/api/state[?project=id]  /kerja/api/ping  /kerja/assets/<file.js>
  * Setara dengan bin/serve-node.mjs (rute & JSON sama — bin/parity.mjs). Read-only: isi tool_result tidak pernah dibaca.
  */
 date_default_timezone_set('UTC');
@@ -66,10 +66,21 @@ $path = rtrim((string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_
 parse_str((string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_QUERY), $q);
 $pick = strtolower((string) ($q['project'] ?? ''));
 $project = $projects[0];
+$found = false;
 foreach ($projects as $d) {
     if ($pidOf($d) === $pick) {
         $project = $d;
+        $found = true;
         break;
+    }
+}
+if (!$found) {
+    $room = strtolower((string) ($q['room'] ?? ''));
+    foreach ($projects as $d) {
+        if ($pidOf($d) === $room) {
+            $project = $d;
+            break;
+        }
     }
 }
 $projectList = static function () use ($runtime, $projects, $pidOf): array {
@@ -99,10 +110,8 @@ if ($path === '/kerja/api/projects') {
 $cfg = KConfig::load($runtime, $project);
 if ($path === '/kerja') {
     $page = (string) file_get_contents($runtime . '/views/page.html');
-    $lq = (string) ($q['layout'] ?? '');
-    $layout = $lq === 'pantai' || $lq === 'kantor' ? $lq : $cfg['layout'];
     $list = count($projects) > 1 ? $projectList() : [];
-    $json = json_encode(KHttp::pageConfig($cfg, ['projects' => $list, 'current' => $pidOf($project), 'layout' => $layout]), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE);
+    $json = json_encode(KHttp::pageConfig($cfg, ['projects' => $list, 'current' => $pidOf($project)]), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE);
     $send(200, ['Content-Type' => 'text/html; charset=utf-8', 'Cache-Control' => 'no-cache'], strtr($page, [
         '{{TITLE}}' => htmlspecialchars($cfg['title'], ENT_QUOTES),
         '{{CONFIG_SCRIPT}}' => '<script>window.KANTOR = ' . $json . ';</script>',

@@ -17,7 +17,6 @@ final class KHttp
     {
         return [
             'title' => $cfg['title'], 'ketua' => $cfg['ketua'], 'team' => $cfg['team'], 'colors' => $cfg['colors'], 'spare_desks' => $cfg['spare_desks'],
-            'layout' => is_string($extra['layout'] ?? null) ? $extra['layout'] : $cfg['layout'],
             'projects' => is_array($extra['projects'] ?? null) ? array_values($extra['projects']) : [],
             'current' => is_string($extra['current'] ?? null) ? $extra['current'] : '',
         ];

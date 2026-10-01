@@ -87,7 +87,11 @@ async function handle(req, res) {
   // config dibaca per permintaan supaya perubahan .opencode/kantor-agent.json langsung terpakai
   const pickProject = (url) => {
     const q = (url.searchParams.get('project') || '').toLowerCase();
-    const i = PROJECTS.findIndex((d) => pidOf(d) === q);
+    let i = PROJECTS.findIndex((d) => pidOf(d) === q);
+    if (i < 0) {
+      const r = (url.searchParams.get('room') || '').toLowerCase();
+      i = PROJECTS.findIndex((d) => pidOf(d) === r);
+    }
     const dir = PROJECTS[i >= 0 ? i : 0];
     return { dir, id: pidOf(dir) };
   };
@@ -100,10 +104,6 @@ async function handle(req, res) {
     }
     return { id: pidOf(dir), title };
   });
-  const layoutOf = (url, cfg) => {
-    const q = url.searchParams.get('layout');
-    return q === 'pantai' || q === 'kantor' ? q : cfg.layout;
-  };
   if (p === '/kerja/api/projects') {
     return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
       JSON.stringify({ app: 'kantor-agent', projects: projectList() }));
@@ -115,7 +115,7 @@ async function handle(req, res) {
     const list = PROJECTS.length > 1 ? projectList() : [];
     const html = page.replace(/\{\{TITLE\}\}|\{\{CONFIG_SCRIPT\}\}/g, (m) => (m === '{{TITLE}}'
       ? htmlEsc(cfg.title)
-      : `<script>window.KANTOR = ${scriptJson(pageConfig(cfg, { projects: list, current: pidOf(PDIR), layout: layoutOf(url, cfg) }))};</script>`));
+      : `<script>window.KANTOR = ${scriptJson(pageConfig(cfg, { projects: list, current: pidOf(PDIR) }))};</script>`));
     return send(res, 200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }, html);
   }
   if (p === '/kerja/api/state') {

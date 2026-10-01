@@ -176,13 +176,17 @@ if (up) {
       const [sp2, sn2] = [await ep.json(), await en.json()];
       const de = diff(sp2, sn2, '$', new Set(['now']));
       check('state project kosong identik', de.length === 0, de.slice(0, 10).join('; '));
+      const [rp2, rn2] = await Promise.all([get(P2, `/kerja/api/state?room=${emptyId}`), get(N2, `/kerja/api/state?room=${emptyId}`)]);
+      const [srp, srn] = [await rp2.json(), await rn2.json()];
+      const dr = diff(srp, srn, '$', new Set(['now']));
+      check('state ?room= identik Node≡PHP', dr.length === 0, dr.slice(0, 10).join('; '));
       const [wp, wn] = await Promise.all([get(P2, `/kerja?project=${emptyId}`), get(N2, `/kerja?project=${emptyId}`)]);
       const [qp, qn] = [await wp.text(), await wn.text()];
       check('/kerja?project= KANTOR identik', wp.status === 200 && wn.status === 200 && diff(cfgOf(qp), cfgOf(qn)).length === 0);
-      const [xp, xn] = await Promise.all([get(P2, `/kerja?project=junk&layout=junk`), get(N2, `/kerja?project=junk&layout=junk`)]);
+      const [xp, xn] = await Promise.all([get(P2, `/kerja?project=junk`), get(N2, `/kerja?project=junk`)]);
       const [yp, yn] = [await xp.text(), await xn.text()];
-      check('project/layout asing → default pertama + kantor', xp.status === 200 && JSON.stringify(cfgOf(yp)) === JSON.stringify(cfgOf(yn))
-        && cfgOf(yp)?.layout === 'kantor' && cfgOf(yp)?.projects?.length === 2);
+      check('project asing → default pertama', xp.status === 200 && JSON.stringify(cfgOf(yp)) === JSON.stringify(cfgOf(yn))
+        && cfgOf(yp)?.projects?.length === 2);
       const [gq, gk] = [await (await get(P2, '/kerja/api/ping')).json(), await (await get(N2, '/kerja/api/ping')).json()];
       check('ping hub identik', gq.project === gk.project && gq.project !== jp2.projects[0].id);
     }
