@@ -130,6 +130,7 @@ Kamera mundur dan dibatasi mengikuti blok grid agar semua ruangan tetap terlihat
 ## Ruang santai
 Di tengah ada satu Ruang Santai bersama: PS, kasur, meja billiard, dan sudut ngopi — tanpa data project.
 Siapa pun yang santai (maks 3 per kantor) bisa mampir lewat pintu; otomatis pulang saat ada tugas.
+Saat sesi OpenCode dalam mode plan, yang santai berkumpul di meja rapat; kembali saat mode build.
 
 ## Fitur pemantauan
 - **Notifikasi browser (opt-in).** Tombol di bar atas meminta izin; bunyi sekali per transisi saat subagent selesai/limit/terhenti atau Ketua aktif kembali — hanya bila tab tersembunyi.

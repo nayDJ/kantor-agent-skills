@@ -14,7 +14,7 @@ require_once __DIR__ . '/Gemini.php';
  */
 final class KTranscripts
 {
-    private const CACHE_V = 3;
+    private const CACHE_V = 4;
     private const EVENTS_KEEP = 40;
     private const SEGS_KEEP = 20;
     private const FILES_KEEP = 12;
@@ -129,6 +129,8 @@ final class KTranscripts
                     'session' => $r['parent_id'] ?? $r['id'],
                     'provider' => 'opencode',
                     'agentType' => is_string($r['agent'] ?? null) && trim((string) $r['agent']) !== '' ? KUtil::clip(trim((string) $r['agent']), 40) : 'general-purpose',
+                    // ponytail: mode = pesan terakhir (assistant.mode; user→agent; compaction→mundur ≤5); plan/build saja.
+                    'mode' => $sum['mode'] ?? null,
                     'description' => is_string($r['title'] ?? null) ? KUtil::safeLine((string) $r['title'], 140) : '',
                 ];
                 if ($r['parent_id'] === null) {
@@ -195,6 +197,7 @@ final class KTranscripts
                     $s['todoSource'] = 'Task';
                 }
             } catch (Throwable) { /* tabel todo opsional */ }
+            $s['mode'] = self::modeOf($db, (string) $sess['id']);
             if ($cacheFile !== null && (is_dir(dirname($cacheFile)) || @mkdir(dirname($cacheFile), 0775, true))) {
                 @file_put_contents($cacheFile, json_encode(['v' => self::CACHE_V, 'updated' => $sess['time_updated'], 's' => $s], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE), LOCK_EX);
             }
@@ -204,7 +207,7 @@ final class KTranscripts
             'tokens' => $s['tokens']['in'] + $s['tokens']['out'] + $s['tokens']['cache'],
             'events' => $s['events'], 'lastKind' => $s['lastKind'], 'limit' => $s['limit'], 'files' => $s['files'],
             'todos' => $s['todos'], 'todosAt' => $s['todosAt'], 'todoSource' => $s['todoSource'], 'segs' => $s['segs'],
-            'stops' => [],
+            'stops' => [], 'mode' => $s['mode'] ?? null,
         ];
     }
 
@@ -213,7 +216,7 @@ final class KTranscripts
     {
         return ['started' => null, 'updated' => null, 'tools' => 0, 'tokens' => ['in' => 0, 'out' => 0, 'cache' => 0],
             'lastMsgId' => null, 'events' => [], 'lastKind' => null, 'limit' => null, 'files' => [],
-            'todos' => null, 'todosAt' => null, 'todosAtMs' => null, 'todoSource' => null, 'segs' => []];
+            'todos' => null, 'todosAt' => null, 'todosAtMs' => null, 'todoSource' => null, 'segs' => [], 'mode' => null];
     }
 
     /** @param array<string,mixed> $s @param array<string,mixed> $p @param array<string,mixed> $m */
@@ -368,6 +371,32 @@ final class KTranscripts
     private static function todoStatus(mixed $v): string
     {
         return in_array($v, ['pending', 'in_progress', 'completed'], true) ? $v : 'pending';
+    }
+
+    // ponytail: session.agent basi (nilai awal); mode aktif = pesan terakhir. JANGAN pakai session.agent.
+    private static function modeOf(PDO $db, string $sid): ?string
+    {
+        try {
+            $rows = self::query($db, 'SELECT m.data AS mdata FROM message m WHERE m.session_id=? ORDER BY m.time_created DESC LIMIT 5', [$sid]);
+        } catch (Throwable) {
+            return null;
+        }
+        foreach ($rows as $row) {
+            $d = json_decode((string) ($row['mdata'] ?? ''), true);
+            if (!is_array($d) || ($d !== [] && array_is_list($d))) {
+                continue;
+            }
+            if (($d['role'] ?? null) === 'assistant') {
+                if (($d['mode'] ?? null) === 'compaction') {
+                    continue;
+                }
+                return ($d['mode'] ?? null) === 'plan' ? 'plan' : ((($d['mode'] ?? null) === 'build') ? 'build' : null);
+            }
+            if (($d['role'] ?? null) === 'user') {
+                return ($d['agent'] ?? null) === 'plan' ? 'plan' : ((($d['agent'] ?? null) === 'build') ? 'build' : null);
+            }
+        }
+        return null;
     }
 
     private static function int(mixed $v): int

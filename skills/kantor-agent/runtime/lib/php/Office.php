@@ -161,6 +161,7 @@ final class KOffice
                 'id' => $r['id'],
                 'agent_type' => $r['agentType'],
                 'provider' => $r['provider'],
+                'mode' => $r['mode'] ?? null,
                 'task' => $task($r),
                 'status' => $lastJob ? $r['status'] : 'selesai',
                 'reason' => $lastJob ? $r['reason'] : null,
@@ -243,6 +244,7 @@ final class KOffice
             'activity' => $dm ? $states[$di][1] : null,
             'session' => $dm ? substr($dm['session'], 0, 8) : null,
             'provider' => $dm ? ($dm['provider'] ?? null) : null,
+            'mode' => $dm ? ($dm['mode'] ?? null) : null,
             'updated' => $dm ? $dm['updated'] : null,
             'last' => $dm ? array_slice(array_values(array_filter(array_reverse($dm['events']), static fn($e) => $e['kind'] !== 'text' && $e['tool'] !== 'Agent' && $e['tool'] !== 'Task')), 0, 8) : [],
             'tools' => $dm ? $dm['tools'] : 0,
@@ -327,7 +329,7 @@ final class KOffice
             $who = $charInfo($job['who'], $r);
             $histOut[] = [
                 'id' => $r['id'], 'who' => $who['key'], 'name' => $who['name'], 'label' => $who['label'], 'color' => $who['color'],
-                'kind' => $job['who']['kind'] === 'pool' ? 'tim' : 'freelancer', 'agent_type' => $r['agentType'], 'provider' => $r['provider'], 'task' => $task($r),
+                'kind' => $job['who']['kind'] === 'pool' ? 'tim' : 'freelancer', 'agent_type' => $r['agentType'], 'provider' => $r['provider'], 'mode' => $r['mode'] ?? null, 'task' => $task($r),
                 'status' => $r['status'], 'started' => $r['started'], 'ended' => $job['end'] === null ? null : $job['endIso'], 'tools' => $r['tools'],
                 'tokens' => $r['tokens'],
             ];
@@ -549,7 +551,7 @@ final class KOffice
             $who = $charInfo($job['who'], $r);
             $out[] = [
                 'id' => $r['id'], 'who' => $who['key'], 'name' => $who['name'], 'label' => $who['label'], 'color' => $who['color'],
-                'kind' => $job['who']['kind'] === 'pool' ? 'tim' : 'freelancer', 'agent_type' => $r['agentType'], 'provider' => $r['provider'], 'task' => $task($r),
+                'kind' => $job['who']['kind'] === 'pool' ? 'tim' : 'freelancer', 'agent_type' => $r['agentType'], 'provider' => $r['provider'], 'mode' => $r['mode'] ?? null, 'task' => $task($r),
                 'status' => $r['status'], 'started' => $r['started'], 'ended' => $job['end'] === null ? null : $job['endIso'], 'tools' => $r['tools'],
                 'tokens' => $r['tokens'],
             ];

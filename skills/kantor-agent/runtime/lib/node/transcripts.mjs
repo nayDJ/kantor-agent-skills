@@ -16,7 +16,7 @@ import { Claude } from './claude.mjs';
 import { Omp } from './omp.mjs';
 import { Gemini } from './gemini.mjs';
 
-const CACHE_V = 3;
+const CACHE_V = 4;
 const EVENTS_KEEP = 40;
 const SEGS_KEEP = 20;
 const FILES_KEEP = 12;
@@ -125,6 +125,8 @@ export class Transcripts {
           session: r.parent_id ?? r.id,
           provider: 'opencode',
           agentType: typeof r.agent === 'string' && phpTrim(r.agent) !== '' ? clip(phpTrim(r.agent), 40) : 'general-purpose',
+          // ponytail: mode = pesan terakhir (assistant.mode; user→agent; compaction→mundur ≤5); plan/build saja.
+          mode: sum.mode ?? null,
           description: typeof r.title === 'string' ? safeLine(r.title, 140) : '',
         };
         if (r.parent_id === null) {
@@ -176,6 +178,7 @@ export class Transcripts {
           s.todoSource = 'Task';
         }
       } catch { /* tabel todo opsional */ }
+      s.mode = modeOf(handle, String(sess.id));
       if (cacheFile) {
         try {
           fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
@@ -186,7 +189,7 @@ export class Transcripts {
     return {
       started: s.started, updated: s.updated, tools: s.tools, tokens: s.tokens.in + s.tokens.out + s.tokens.cache,
       events: s.events, lastKind: s.lastKind, limit: s.limit, files: s.files, todos: s.todos, todosAt: s.todosAt,
-      todoSource: s.todoSource, segs: s.segs, stops: [],
+      todoSource: s.todoSource, segs: s.segs, stops: [], mode: s.mode ?? null,
     };
   }
 
@@ -309,11 +312,29 @@ function fresh() {
   return {
     started: null, updated: null, tools: 0, tokens: { in: 0, out: 0, cache: 0 }, lastMsgId: null,
     events: [], lastKind: null, limit: null, files: [], todos: null, todosAt: null, todosAtMs: null,
-    todoSource: null, segs: [],
+    todoSource: null, segs: [], mode: null,
   };
 }
 function todoStatus(v) {
   return ['pending', 'in_progress', 'completed'].includes(v) ? v : 'pending';
+}
+// ponytail: session.agent basi (nilai awal); mode aktif = pesan terakhir. JANGAN pakai session.agent.
+function modeOf(handle, sid) {
+  let rows = [];
+  try {
+    rows = query(handle, `SELECT m.data AS mdata FROM message m WHERE m.session_id=? ORDER BY m.time_created DESC LIMIT 5`, [sid]);
+  } catch { return null; }
+  for (const row of rows) {
+    let d;
+    try { d = JSON.parse(row.mdata); } catch { continue; }
+    if (!isPlainObj(d)) continue;
+    if (d.role === 'assistant') {
+      if (d.mode === 'compaction') continue;
+      return d.mode === 'plan' ? 'plan' : d.mode === 'build' ? 'build' : null;
+    }
+    if (d.role === 'user') return d.agent === 'plan' ? 'plan' : d.agent === 'build' ? 'build' : null;
+  }
+  return null;
 }
 function int(v) {
   return typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : 0;

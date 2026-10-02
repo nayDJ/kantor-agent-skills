@@ -144,6 +144,25 @@ if (up) {
   checkEmbedded(sp, 'state-php'); checkEmbedded(sn, 'state-node');
   checkRuns(hp0j.runs, 'history-php'); checkRuns(hn0j.runs, 'history-node');
   check('provider valid di state & history (runs+ketua)', provBad.length === 0, provBad.slice(0, 10).join('; '));
+  // M1: mode sesi dari pesan terakhir (plan/build/null); provider lain null. Deterministik: DB & respons sama.
+  const modeBad = [];
+  const modesOf = (s, where) => {
+    const out = [];
+    const one = (o, label) => {
+      if (o == null || !Object.hasOwn(o, 'mode')) modeBad.push(`${label}: tanpa key mode`);
+      else if (!(o.mode === 'plan' || o.mode === 'build' || o.mode === null)) modeBad.push(`${label}=${JSON.stringify(o.mode)}`);
+      out.push(o?.mode ?? null);
+    };
+    if (s.ketua) one(s.ketua, `${where}.ketua`);
+    for (const [i, r] of (s.runs ?? []).entries()) one(r, `${where}.runs[${i}]`);
+    for (const m of [...(s.team ?? []), ...(s.freelancers ?? [])]) if (m?.run != null) one(m.run, `${where}.${m.key}.run`);
+    return out;
+  };
+  const mPhp = [...modesOf(sp, 'state-php'), ...modesOf(hp0j, 'history-php')];
+  const mNode = [...modesOf(sn, 'state-node'), ...modesOf(hn0j, 'history-node')];
+  check(`mode terisi & valid (plan/build/null) identik Node≡PHP (${mPhp.filter((m) => m !== null).length} bermode)`,
+    modeBad.length === 0 && JSON.stringify(mPhp) === JSON.stringify(mNode),
+    [...modeBad.slice(0, 10), JSON.stringify(mPhp) !== JSON.stringify(mNode) ? `php≠node ${JSON.stringify(mPhp).slice(0, 120)}` : ''].filter(Boolean).join('; '));
 
   const [hp, hn] = await Promise.all([get(P, '/kerja'), get(N, '/kerja')]);
   const [tp, tn] = [await hp.text(), await hn.text()];

@@ -1889,6 +1889,54 @@ function lounge(a, now, instant) {
   if (instant) placeAt(a, `spot:${id}`);
   else goTo(a, `spot:${id}`);
 }
+// ponytail M2: saat mode plan, yang santai berkumpul di meja rapat; build/null = perilaku lama.
+function meetSeat(a, now, instant, plan) {
+  if (!a || a.work) return false;
+  const room = roomOf(a);
+  const gr = goalRaw(a);
+  const atMeet = gr === 'spot:meet1' || gr === 'spot:meet2' || gr === 'spot:meet3';
+  if (a.walking) return plan || (atMeet && !plan && !!room?._meetMode); // ponytail: tak potong animasi jalan; alihkan poll berikut
+  if (plan) {
+    if (atMeet) return true;
+    const taken = claimedSpots(a);
+    const free = ['meet1', 'meet2', 'meet3'].filter((id) => !taken.has(id));
+    if (!free.length) return false; // penuh → spot santai biasa
+    const alt = free.filter((id) => `spot:${id}` !== gr);
+    const id = pickOne(alt.length ? alt : free);
+    a.spotUntil = now + (REDUCED ? 90000 : 38000 + Math.random() * 34000);
+    if (instant) placeAt(a, `spot:${id}`);
+    else goTo(a, `spot:${id}`);
+    if (!instant && room && !room._meetSaid) {
+      room._meetSaid = true;
+      say(room.ketua || a, 'Rapat dulu!', 3600);
+    }
+    return true;
+  }
+  if (atMeet && room && room._meetMode) {
+    // ponytail: plan→build, tinggalkan rapat via spot santai biasa (bukan meet)
+    const IDS = room.spotIds || SPOT_IDS;
+    const taken = claimedSpots(a);
+    const nonMeet = (id) => id !== 'meet1' && id !== 'meet2' && id !== 'meet3';
+    const pool = IDS.filter((id) => nonMeet(id) && !taken.has(id) && `spot:${id}` !== gr);
+    const fb = pool.length ? pool : IDS.filter((id) => nonMeet(id) && !taken.has(id));
+    if (!fb.length) { a.spotUntil = 0; return true; }
+    const id = pickOne(fb);
+    a.spotUntil = now + (REDUCED ? 90000 : 38000 + Math.random() * 34000);
+    if (instant) placeAt(a, `spot:${id}`);
+    else goTo(a, `spot:${id}`);
+    return true;
+  }
+  return false;
+}
+function meetOccupied(room) {
+  for (const a of (room?.actors || []).values()) {
+    if ((a.kind === 'ketua' || a.kind === 'tim') && !a.work) {
+      const g = goalRaw(a);
+      if (g === 'spot:meet1' || g === 'spot:meet2' || g === 'spot:meet3') return true;
+    }
+  }
+  return false;
+}
 function chatter(now) {
   if (now < LOUNGE.chatAt) return;
   LOUNGE.chatAt = now + 7000 + Math.random() * 4500;
@@ -2453,6 +2501,7 @@ function apply(d, room) {
   const now = performance.now();
   const live = !firstLoad;
   const R0 = room;
+  const plan = d.ketua?.mode === 'plan'; // ponytail M2: satu-satunya sinyal plan (tim santai run:null)
 
   // Ketua
   if (!KETUA) return; // ponytail: ruang santai tanpa aktor
@@ -2474,7 +2523,8 @@ function apply(d, room) {
       else goTo(KETUA, 'desk:A0');
     } else if (firstLoad) placeAt(KETUA, 'desk:A0');
     else goTo(KETUA, 'desk:A0');
-  } else if (!KETUA.portal && !KETUA.inLounge && (!goalRaw(KETUA).startsWith('spot:') || firstLoad)) lounge(KETUA, now, firstLoad); // ponytail: jangan batalkan jalan/pulang santai
+  } else if (!KETUA.portal && !KETUA.inLounge) {
+    if (!meetSeat(KETUA, now, firstLoad, plan) && (!goalRaw(KETUA).startsWith('spot:') || firstLoad)) lounge(KETUA, now, firstLoad); // ponytail: jangan batalkan jalan/pulang santai
   if (live && kPrev && kPrev.state === 'bekerja' && d.ketua?.state === 'selesai') say(KETUA, 'Beres, menunggu instruksi berikutnya', 3800, 'hi');
   prev.set(KETUA.key, { state: d.ketua?.state });
 
@@ -2507,10 +2557,17 @@ function apply(d, room) {
       }
     } else {
       if (live && p && p.state === 'bekerja') say(a, 'Beres!', 3600, 'hi');
-      if (!a.portal && !a.inLounge && (!goalRaw(a).startsWith('spot:') || firstLoad)) lounge(a, now, firstLoad); // ponytail: jangan batalkan jalan/pulang santai
+      if (!a.portal && !a.inLounge && !meetSeat(a, now, firstLoad, plan) && (!goalRaw(a).startsWith('spot:') || firstLoad)) lounge(a, now, firstLoad); // ponytail: jangan batalkan jalan/pulang santai
     }
     prev.set(a.key, { state: m.state, runId: m.run?.id ?? null });
   });
+
+  // ponytail M2: kenang mode rapat per room; lepas saat tak ada yang santai di meja rapat
+  if (plan) room._meetMode = true;
+  else {
+    room._meetSaid = false;
+    if (!meetOccupied(room)) room._meetMode = false;
+  }
 
   // freelancer: datang lewat pintu, duduk di meja cadangan, pulang lewat pintu
   const seen = new Set();

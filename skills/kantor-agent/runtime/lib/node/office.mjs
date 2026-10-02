@@ -131,6 +131,7 @@ export function buildState({ projectDir, storageDir, cfg, now }) {
       id: r.id,
       agent_type: r.agentType,
       provider: r.provider,
+      mode: r.mode ?? null,
       task: task(r),
       status: lastJob ? r.status : 'selesai',
       reason: lastJob ? r.reason : null,
@@ -183,6 +184,7 @@ export function buildState({ projectDir, storageDir, cfg, now }) {
     activity: dm ? states[di][1] : null,
     session: dm ? dm.session.slice(0, 8) : null,
     provider: dm ? dm.provider ?? null : null,
+    mode: dm ? dm.mode ?? null : null,
     updated: dm ? dm.updated : null,
     last: dm ? [...dm.events].reverse().filter((e) => e.kind !== 'text' && e.tool !== 'Agent' && e.tool !== 'Task').slice(0, 8) : [],
     tools: dm ? dm.tools : 0,
@@ -255,7 +257,7 @@ export function buildState({ projectDir, storageDir, cfg, now }) {
     const who = charInfo(job.who, r);
     return {
       id: r.id, who: who.key, name: who.name, label: who.label, color: who.color, kind: job.who.kind === 'pool' ? 'tim' : 'freelancer',
-      agent_type: r.agentType, provider: r.provider, task: task(r), status: r.status, started: r.started, ended: job.end === null ? null : job.endIso, tools: r.tools, tokens: r.tokens,
+      agent_type: r.agentType, provider: r.provider, mode: r.mode ?? null, task: task(r), status: r.status, started: r.started, ended: job.end === null ? null : job.endIso, tools: r.tools, tokens: r.tokens,
     };
   });
   const recent = runs.filter((r) => now - tsMs(r.started) <= 48 * 3600 * 1000).map((r) => r.started);
@@ -410,7 +412,7 @@ export function buildHistory({ projectDir, storageDir, cfg, now, since, q }) {
       const who = charInfo(job.who, r);
       return {
         id: r.id, who: who.key, name: who.name, label: who.label, color: who.color, kind: job.who.kind === 'pool' ? 'tim' : 'freelancer',
-        agent_type: r.agentType, provider: r.provider, task: task(r), status: r.status, started: r.started, ended: job.end === null ? null : job.endIso, tools: r.tools, tokens: r.tokens,
+        agent_type: r.agentType, provider: r.provider, mode: r.mode ?? null, task: task(r), status: r.status, started: r.started, ended: job.end === null ? null : job.endIso, tools: r.tools, tokens: r.tokens,
       };
     });
   return { app: 'kantor-agent', project: cfg.title, runs: out };
