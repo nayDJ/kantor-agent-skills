@@ -2525,6 +2525,7 @@ function apply(d, room) {
     else goTo(KETUA, 'desk:A0');
   } else if (!KETUA.portal && !KETUA.inLounge) {
     if (!meetSeat(KETUA, now, firstLoad, plan) && (!goalRaw(KETUA).startsWith('spot:') || firstLoad)) lounge(KETUA, now, firstLoad); // ponytail: jangan batalkan jalan/pulang santai
+  }
   if (live && kPrev && kPrev.state === 'bekerja' && d.ketua?.state === 'selesai') say(KETUA, 'Beres, menunggu instruksi berikutnya', 3800, 'hi');
   prev.set(KETUA.key, { state: d.ketua?.state });
 
